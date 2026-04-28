@@ -541,11 +541,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return nth === 1 || nth === 3;
     }
 
-    function isHoliday(dateObj, dateStr) {
-        const special = state.specialDayRules[dateStr];
+    function isHolidayWithRules(dateObj, dateStr, specialRules = state.specialDayRules) {
+        const special = specialRules && specialRules[dateStr];
         if (special === 'weekday') return false;
         if (special === 'holiday') return true;
         return dateObj.getDay() === 0 || dateObj.getDay() === 6 || !!state.holidays[dateStr];
+    }
+
+    function isHoliday(dateObj, dateStr) {
+        return isHolidayWithRules(dateObj, dateStr, state.specialDayRules);
     }
 
     function getRequiredRoles(dateObj, dateStr) {
@@ -571,12 +575,60 @@ document.addEventListener('DOMContentLoaded', () => {
 	        return dateStr.slice(0, 7);
 	    }
 
+    function getFiscalYearStartYear(dateObj = state.currentDate) {
+        return dateObj.getMonth() >= 3 ? dateObj.getFullYear() : dateObj.getFullYear() - 1;
+    }
+
+    function isMonthKeyInFiscalYear(monthKey, fiscalStartYear) {
+        const [year, month] = String(monthKey).split('-').map(Number);
+        if (!year || !month) return false;
+        if (year === fiscalStartYear && month >= 4) return true;
+        if (year === fiscalStartYear + 1 && month <= 3) return true;
+        return false;
+    }
+
 	    function getShiftForDate(dateStr) {
 	        if (state.shifts[dateStr]) return state.shifts[dateStr];
 	        if (getMonthKeyFromDateStr(dateStr) === getCurrentMonthKey()) return {};
 	        const savedMonth = state.savedMonths[getMonthKeyFromDateStr(dateStr)];
 	        return (savedMonth && savedMonth.shifts && savedMonth.shifts[dateStr]) || {};
 	    }
+
+    function countShiftEntriesForDoctor(shifts, doctorId, specialRules) {
+        const stats = { total: 0, holiday: 0 };
+        for (const [dateStr, dayShifts] of Object.entries(shifts || {})) {
+            const [yy, mm, dd] = String(dateStr).split('-').map(Number);
+            const dateObj = new Date(yy, (mm || 1) - 1, dd || 1);
+            const isHol = isHolidayWithRules(dateObj, dateStr, specialRules);
+            for (const val of Object.values(dayShifts || {})) {
+                if (val === doctorId) {
+                    stats.total++;
+                    if (isHol) stats.holiday++;
+                }
+            }
+        }
+        return stats;
+    }
+
+    function getDoctorFiscalYearDutyStats(doctorId) {
+        const fiscalStartYear = getFiscalYearStartYear(state.currentDate);
+        const combinedShifts = {};
+        const combinedSpecialRules = {};
+
+        for (const [monthKey, snapshot] of Object.entries(state.savedMonths || {})) {
+            if (!isMonthKeyInFiscalYear(monthKey, fiscalStartYear)) continue;
+            Object.assign(combinedShifts, (snapshot && snapshot.shifts) || {});
+            Object.assign(combinedSpecialRules, (snapshot && snapshot.specialDayRules) || {});
+        }
+
+        for (const [dateStr, dayShifts] of Object.entries(state.shifts || {})) {
+            if (!isMonthKeyInFiscalYear(getMonthKeyFromDateStr(dateStr), fiscalStartYear)) continue;
+            combinedShifts[dateStr] = dayShifts;
+        }
+        Object.assign(combinedSpecialRules, state.specialDayRules || {});
+
+        return countShiftEntriesForDoctor(combinedShifts, doctorId, combinedSpecialRules);
+    }
 
     function getCurrentFormResponseStatus() {
         return state.formResponseStatus[getCurrentMonthKey()] || null;
@@ -1430,10 +1482,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const dateObj = new Date(dateStr);
         const weekend = isWeekendDate(dateObj);
         const isSunday = dateObj.getDay() === 0;
+        const isHolidaySlot = isHoliday(dateObj, dateStr);
+        const fiscalStats = getDoctorFiscalYearDutyStats(doc.id);
         let score = count === 0
             ? 0
             : 1000000 + (GROUP_PRIORITY[doc.group] || 0) * 100000 + count * 1000;
 
+        score += fiscalStats.total * 25000;
+        if (isHolidaySlot) score += fiscalStats.holiday * 35000;
         if (needsFormNonResponderDuty(doc)) score -= 500000;
         if (role === 'erNight' && isPriorityErNightDoctor(doc)) score -= 50000;
         if (isWeekendPrioritySeniorDoctor(doc)) {
@@ -1603,6 +1659,8 @@ document.addEventListener('DOMContentLoaded', () => {
             '・通常医師は月1回を優先\n' +
             '・救急日直希望○は固定枠以外の休日救急日中のみ\n' +
             '・フォーム未回答者は月1回を最優先します\n' +
+            '・年度内（4月〜翌3月）の総当直回数が少ない医師を優先します\n' +
+            '・土日祝枠では年度内の土日祝回数が少ない医師を優先します\n' +
             '・全員1回後の残枠は、回数より下の学年を優先\n' +
             '・救急日中は第一希望を全体優先→第二希望→通常候補\n' +
             '・NG第1/第2/第3希望は禁止\n' +
