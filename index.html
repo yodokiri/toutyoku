@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>当直表作成・調整アプリ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./styles.css">
+    <!-- SheetJS-compatible library with style support for Excel export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+</head>
+<body>
+    <div class="app-wrapper">
+        <header class="app-header">
+            <div class="logo">
+                <span class="icon">🏥</span>
+                <h1>当直表作成ツール</h1>
+            </div>
+            <div class="month-selector">
+                <button id="prev-month" class="icon-btn" aria-label="前の月">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+                <h2 id="current-month-display">2026年 4月</h2>
+                <button id="next-month" class="icon-btn" aria-label="次の月">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+            </div>
+            <div class="header-actions">
+                <button id="today-btn" class="btn-outline">当月</button>
+                <button id="export-excel-btn" class="btn-secondary">📊 Excel出力</button>
+                <button id="save-month-btn" class="btn-secondary">💾 月保存</button>
+                <button id="auto-assign-btn" class="btn-primary" style="margin-left: 8px;">✨ 自動割り振り</button>
+            </div>
+        </header>
+
+        <main class="app-container">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Import Section -->
+                <div class="import-section">
+                    <div class="import-buttons">
+                        <label for="form-csv-upload" class="btn-outline-small csv-label">📝 フォーム回答取込</label>
+                        <input type="file" id="form-csv-upload" accept=".csv,.xlsx" class="hidden">
+                    </div>
+                    <div class="help-text">GoogleフォームのCSV/XLSXをそのまま取込できます</div>
+                    <div class="help-text">外来曜日はアプリ内医師マスタを使用します</div>
+                    <div class="help-text">※ 医師マスタ（56名・区分・救急日中希望）は初回起動時に自動登録されます</div>
+                </div>
+
+                <div class="sidebar-scrollable">
+                    <section class="doctor-management">
+                        <!-- 医師追加フォーム -->
+                        <div class="section-header" style="border-bottom:none; padding-bottom:8px;">
+                            <h3>👨‍⚕️ 医師の新規追加</h3>
+                        </div>
+                        <form id="add-doctor-form" class="add-doctor-form">
+                            <input type="text" id="new-doctor-name" placeholder="医師名 (例: 山田 太郎)" required autocomplete="off">
+
+                            <div class="doctor-form-options">
+                                <label style="font-size:0.8rem;font-weight:600;">区分</label>
+                                <select id="new-doctor-group" style="padding:6px 10px;font-size:0.85rem;border:1px solid var(--border);border-radius:var(--radius-sm);">
+                                    <option value="3-5年目">3–5年目</option>
+                                    <option value="6-7年目">6–7年目</option>
+                                    <option value="副医長">副医長</option>
+                                    <option value="医長">医長</option>
+                                    <option value="副部長">副部長</option>
+                                    <option value="部長">部長</option>
+                                </select>
+                                <label><input type="checkbox" id="new-doctor-holiday-er-day"> 休日救急日中希望</label>
+                                <input type="text" id="new-doctor-outpatient" placeholder="外来曜日 (例: 月,水)" autocomplete="off">
+                            </div>
+
+                            <div class="ng-dates-section">
+                                <label style="font-size: 0.8rem; font-weight: 600; color: #4b5563;">不可日（NG）の設定</label>
+                                <div class="ng-input-group">
+                                    <input type="date" id="ng-date-val">
+                                    <select id="ng-weight-val">
+                                        <option value="hard">第1希望不可</option>
+                                        <option value="soft">第2希望不可</option>
+                                        <option value="soft3">第3希望不可</option>
+                                    </select>
+                                    <button type="button" id="add-ng-btn" class="btn-outline-small">+</button>
+                                </div>
+                                <ul id="pending-ng-list" class="pending-ng-list"></ul>
+                            </div>
+
+                            <button type="submit" class="btn-primary" style="width: 100%; margin-top: 8px;">追加</button>
+                        </form>
+                        <!-- 登録済み医師一覧 -->
+                        <div class="doctor-list-container" style="border-top: 1px solid var(--border);">
+                            <div class="section-header" style="padding-left:0;">
+                                <h3>📋 登録済み医師一覧</h3>
+                            </div>
+                            <ul id="doctor-list" class="doctor-list"></ul>
+                        </div>
+                    </section>
+                </div>
+
+                <div class="sidebar-footer">
+                    <button id="clear-all-data-btn" class="btn-danger-text">全てのデータを消去</button>
+                </div>
+            </aside>
+
+            <!-- Calendar -->
+            <section class="calendar-section">
+                <div class="calendar-card">
+                    <div class="calendar-header-days">
+                        <div class="day-label sun">日</div>
+                        <div class="day-label">月</div>
+                        <div class="day-label">火</div>
+                        <div class="day-label">水</div>
+                        <div class="day-label">木</div>
+                        <div class="day-label">金</div>
+                        <div class="day-label sat">土</div>
+                    </div>
+                    <div id="calendar-grid" class="calendar-grid"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal for Assignment -->
+    <div id="assignment-modal" class="modal hidden" aria-hidden="true">
+        <div class="modal-overlay" id="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">日付の当直編集</h3>
+                <button class="close-btn" id="close-modal" aria-label="閉じる">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-date-info" id="modal-date-display"></p>
+
+                <!-- 日種別の上書き -->
+                <div class="form-group" id="fg-day-type">
+                    <label for="select-day-type" style="font-size:0.8rem;">日種別の上書き（特別ルール）</label>
+                    <select id="select-day-type" style="padding:6px 10px;font-size:0.85rem;">
+                        <option value="">自動判定</option>
+                        <option value="weekday">平日扱い</option>
+                        <option value="holiday">休日扱い</option>
+                    </select>
+                </div>
+
+                <div id="modal-warnings" class="modal-warnings hidden"></div>
+
+                <!-- 病棟日中 (休日のみ) -->
+                <div class="form-group hidden" id="fg-ward-day">
+                    <label for="select-ward-day">🏥 病棟日中（8年目以上）</label>
+                    <select id="select-ward-day" data-role="wardDay"><option value="">-- 未割り当て --</option></select>
+                </div>
+                <!-- 病棟夜間 -->
+                <div class="form-group hidden" id="fg-ward-night">
+                    <label for="select-ward-night">🏥 病棟夜間（8年目以上）</label>
+                    <select id="select-ward-night" data-role="wardNight"><option value="">-- 未割り当て --</option></select>
+                </div>
+                <!-- 救急日中 [特別枠] (休日のみ) -->
+                <div class="form-group hidden" id="fg-er-day">
+                    <label for="select-er-day">🚑 救急日中 [特別枠]（救急日中希望者）</label>
+                    <select id="select-er-day" data-role="erDay"><option value="">-- 未割り当て --</option></select>
+                </div>
+                <!-- 救急夜間 -->
+                <div class="form-group hidden" id="fg-er-night">
+                    <label for="select-er-night">🚑 救急夜間（7年目以下）</label>
+                    <select id="select-er-night" data-role="erNight"><option value="">-- 未割り当て --</option></select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-assignment" class="btn-secondary">キャンセル</button>
+                <button id="save-assignment" class="btn-primary">保存する</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="./app.js"></script>
+</body>
+</html>
