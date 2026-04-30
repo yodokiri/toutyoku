@@ -1095,6 +1095,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const count = getDoctorMonthlyCount(doc.id);
             const li = document.createElement('li');
             li.className = 'doctor-item';
+            if (isFormNonResponder(doc)) li.classList.add('doctor-missing-response');
+            if (count === 0) li.classList.add('doctor-zero-count');
+            if (count >= 2) li.classList.add('doctor-max-count');
             const groupCls = getGroupBadgeClass(doc.group);
             let badges = `<span class="badge-group ${groupCls}">${doc.group}</span>`;
             if (doc.holidayErDayPreferred) badges += '<span class="badge-erday-pref">救急日中可</span>';
@@ -1124,8 +1127,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	    function renderCalendar() {
 	        const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth();
 	        const monthKey = getMonthKey(state.currentDate);
-	        const savedLabel = state.savedMonths[monthKey] ? '（保存済）' : '';
-	        els.currentMonthDisplay.textContent = `${y}年 ${m + 1}月${savedLabel}`;
+	        els.currentMonthDisplay.innerHTML = `${y}年 ${m + 1}月${state.savedMonths[monthKey] ? ' <span class="saved-month-badge">保存済</span>' : ''}`;
         els.calendarGrid.innerHTML = '';
         const fd = new Date(y, m, 1), ld = new Date(y, m + 1, 0);
         const td = new Date();
