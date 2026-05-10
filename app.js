@@ -459,25 +459,91 @@ document.addEventListener('DOMContentLoaded', () => {
     let editingDateStr = null;
     let editingDateObj = null;
 
-	    const rawDoctors = JSON.parse(localStorage.getItem('doctors')) || [];
-	    const rawShifts = JSON.parse(localStorage.getItem('shifts')) || {};
-	    const rawSavedMonths = migrateSavedMonths(JSON.parse(localStorage.getItem('savedMonths')) || {});
+    const STORAGE_KEYS = {
+        doctors: 'doctors',
+        shifts: 'shifts',
+        specialDayRules: 'specialDayRules',
+        savedMonths: 'savedMonths',
+        formResponseStatus: 'formResponseStatus',
+        syncConfig: 'sharedSaveConfig',
+        syncClientId: 'sharedSaveClientId',
+        syncRemoteMeta: 'sharedSaveRemoteMeta'
+    };
 
-	    const state = {
-	        currentDate: new Date(),
-	        doctors: rawDoctors.map(migrateDoctor),
-	        shifts: migrateShifts(rawShifts),
-	        holidays: {},
-	        specialDayRules: JSON.parse(localStorage.getItem('specialDayRules')) || {},
-	        savedMonths: rawSavedMonths,
-	        formResponseStatus: JSON.parse(localStorage.getItem('formResponseStatus')) || {}
-	    };
+    function readStoredJson(key, fallback) {
+        try {
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : fallback;
+        } catch (err) {
+            console.warn('Storage parse error:', key, err);
+            return fallback;
+        }
+    }
+
+    function writeStoredJson(key, value) {
+        localStorage.setItem(key, JSON.stringify(value));
+    }
+
+    function normalizeSyncConfig(config) {
+        return {
+            endpoint: String((config && config.endpoint) || '').trim(),
+            appKey: String((config && config.appKey) || '').trim(),
+            userName: String((config && config.userName) || '').trim()
+        };
+    }
+
+    function loadLocalSnapshot() {
+        const rawDoctors = readStoredJson(STORAGE_KEYS.doctors, []);
+        return {
+            doctors: (Array.isArray(rawDoctors) ? rawDoctors : []).map(migrateDoctor),
+            shifts: migrateShifts(readStoredJson(STORAGE_KEYS.shifts, {}) || {}),
+            specialDayRules: readStoredJson(STORAGE_KEYS.specialDayRules, {}) || {},
+            savedMonths: migrateSavedMonths(readStoredJson(STORAGE_KEYS.savedMonths, {}) || {}),
+            formResponseStatus: readStoredJson(STORAGE_KEYS.formResponseStatus, {}) || {}
+        };
+    }
+
+    const localSnapshot = loadLocalSnapshot();
+
+    const state = {
+        currentDate: new Date(),
+        doctors: localSnapshot.doctors,
+        shifts: localSnapshot.shifts,
+        holidays: {},
+        specialDayRules: localSnapshot.specialDayRules,
+        savedMonths: localSnapshot.savedMonths,
+        formResponseStatus: localSnapshot.formResponseStatus
+    };
+
+    const syncState = {
+        config: normalizeSyncConfig(readStoredJson(STORAGE_KEYS.syncConfig, {})),
+        clientId: localStorage.getItem(STORAGE_KEYS.syncClientId) || generateId(),
+        remoteMeta: readStoredJson(STORAGE_KEYS.syncRemoteMeta, { revision: '', updatedAt: '', updatedBy: '' }) || {},
+        saveTimer: null,
+        saveInFlight: false,
+        saveQueued: false,
+        queuedReason: '',
+        lastConflictRevision: ''
+    };
+    localStorage.setItem(STORAGE_KEYS.syncClientId, syncState.clientId);
 
     // ===== DOM References =====
-    const els = {
-        currentMonthDisplay: document.getElementById('current-month-display'),
-        prevMonthBtn: document.getElementById('prev-month'),
-        nextMonthBtn: document.getElementById('next-month'),
+	    const els = {
+	        currentMonthDisplay: document.getElementById('current-month-display'),
+	        prevMonthBtn: document.getElementById('prev-month'),
+	        nextMonthBtn: document.getElementById('next-month'),
+            syncStatus: document.getElementById('sync-status'),
+            syncRefreshBtn: document.getElementById('sync-refresh-btn'),
+            syncSettingsBtn: document.getElementById('sync-settings-btn'),
+            syncSettingsModal: document.getElementById('sync-settings-modal'),
+            syncSettingsOverlay: document.getElementById('sync-settings-overlay'),
+            closeSyncSettingsBtn: document.getElementById('close-sync-settings'),
+            cancelSyncSettingsBtn: document.getElementById('cancel-sync-settings'),
+            saveSyncSettingsBtn: document.getElementById('save-sync-settings'),
+            disableSyncSettingsBtn: document.getElementById('disable-sync-settings'),
+            syncEndpointUrl: document.getElementById('sync-endpoint-url'),
+            syncAppKey: document.getElementById('sync-app-key'),
+            syncUserName: document.getElementById('sync-user-name'),
 	        todayBtn: document.getElementById('today-btn'),
 	        autoAssignBtn: document.getElementById('auto-assign-btn'),
 	        exportExcelBtn: document.getElementById('export-excel-btn'),
@@ -518,13 +584,321 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // ===== Persistence =====
-    function saveData() {
-	        localStorage.setItem('doctors', JSON.stringify(state.doctors));
-	        localStorage.setItem('shifts', JSON.stringify(state.shifts));
-	        localStorage.setItem('specialDayRules', JSON.stringify(state.specialDayRules));
-	        localStorage.setItem('savedMonths', JSON.stringify(state.savedMonths));
-	        localStorage.setItem('formResponseStatus', JSON.stringify(state.formResponseStatus));
-	    }
+    function buildPersistedSnapshot() {
+        return {
+            schemaVersion: 2,
+            savedAt: new Date().toISOString(),
+            doctors: state.doctors,
+            shifts: state.shifts,
+            specialDayRules: state.specialDayRules,
+            savedMonths: state.savedMonths,
+            formResponseStatus: state.formResponseStatus
+        };
+    }
+
+    function applyPersistedSnapshot(snapshot) {
+        if (!snapshot || typeof snapshot !== 'object') return;
+        state.doctors = (Array.isArray(snapshot.doctors) ? snapshot.doctors : []).map(migrateDoctor);
+        state.shifts = migrateShifts(snapshot.shifts || {});
+        state.specialDayRules = snapshot.specialDayRules || {};
+        state.savedMonths = migrateSavedMonths(snapshot.savedMonths || {});
+        state.formResponseStatus = snapshot.formResponseStatus || {};
+    }
+
+    function saveLocalData() {
+        writeStoredJson(STORAGE_KEYS.doctors, state.doctors);
+        writeStoredJson(STORAGE_KEYS.shifts, state.shifts);
+        writeStoredJson(STORAGE_KEYS.specialDayRules, state.specialDayRules);
+        writeStoredJson(STORAGE_KEYS.savedMonths, state.savedMonths);
+        writeStoredJson(STORAGE_KEYS.formResponseStatus, state.formResponseStatus);
+    }
+
+    function saveRemoteMeta() {
+        writeStoredJson(STORAGE_KEYS.syncRemoteMeta, syncState.remoteMeta || {});
+    }
+
+    function isSharedSyncEnabled() {
+        return !!(syncState.config && syncState.config.endpoint);
+    }
+
+    function getSyncUserName() {
+        return syncState.config.userName || '未設定の利用者';
+    }
+
+    function formatSyncTime(iso) {
+        if (!iso) return '';
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function updateSyncStatus(kind, message, title) {
+        if (!els.syncStatus) return;
+        const enabled = isSharedSyncEnabled();
+        const resolvedKind = enabled ? kind : 'local';
+        const labelMap = {
+            local: 'ローカル保存',
+            ready: '共有接続中',
+            pending: '共有保存待ち',
+            syncing: '共有同期中',
+            saved: message || '共有保存済',
+            conflict: '他者更新あり',
+            error: '共有保存エラー'
+        };
+        els.syncStatus.className = `sync-status sync-${resolvedKind}`;
+        els.syncStatus.textContent = labelMap[resolvedKind] || labelMap.local;
+        els.syncStatus.title = title || (enabled
+            ? `共有保存: ${syncState.config.endpoint}`
+            : 'この端末のブラウザ内に保存しています');
+        if (els.syncRefreshBtn) els.syncRefreshBtn.disabled = !enabled;
+    }
+
+    function renderSyncStatusFromMeta() {
+        if (!isSharedSyncEnabled()) {
+            updateSyncStatus('local');
+            return;
+        }
+        const updated = formatSyncTime(syncState.remoteMeta && syncState.remoteMeta.updatedAt);
+        const by = (syncState.remoteMeta && syncState.remoteMeta.updatedBy) || '';
+        updateSyncStatus(
+            syncState.remoteMeta && syncState.remoteMeta.revision ? 'saved' : 'ready',
+            updated ? `共有保存済 ${updated}` : '共有接続中',
+            by ? `最終更新: ${updated} / ${by}` : '共有保存に接続しています'
+        );
+    }
+
+    function buildSharedUrl(params) {
+        const url = new URL(syncState.config.endpoint);
+        Object.entries(params || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) url.searchParams.set(key, value);
+        });
+        if (syncState.config.appKey) url.searchParams.set('appKey', syncState.config.appKey);
+        return url.toString();
+    }
+
+    function requestSharedJsonp(params, timeoutMs = 15000) {
+        return new Promise((resolve, reject) => {
+            if (!isSharedSyncEnabled()) {
+                reject(new Error('共有保存が設定されていません。'));
+                return;
+            }
+            const callbackName = `__dutySync_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            const script = document.createElement('script');
+            let timer = null;
+            const cleanup = () => {
+                if (timer) clearTimeout(timer);
+                delete window[callbackName];
+                if (script.parentNode) script.parentNode.removeChild(script);
+            };
+            window[callbackName] = payload => {
+                cleanup();
+                if (payload && payload.ok) resolve(payload);
+                else reject(new Error((payload && payload.error) || '共有保存の応答が不正です。'));
+            };
+            script.onerror = () => {
+                cleanup();
+                reject(new Error('共有保存に接続できませんでした。'));
+            };
+            timer = setTimeout(() => {
+                cleanup();
+                reject(new Error('共有保存の応答がタイムアウトしました。'));
+            }, timeoutMs);
+            try {
+                script.src = buildSharedUrl({ ...params, callback: callbackName, t: Date.now() });
+            } catch (err) {
+                cleanup();
+                reject(err);
+                return;
+            }
+            document.head.appendChild(script);
+        });
+    }
+
+    async function postSharedSnapshot(reason, expectedRevision) {
+        const body = new URLSearchParams();
+        body.set('action', 'save');
+        body.set('appKey', syncState.config.appKey || '');
+        body.set('expectedRevision', expectedRevision || '');
+        body.set('updatedBy', getSyncUserName());
+        body.set('clientId', syncState.clientId);
+        body.set('reason', reason || '変更');
+        body.set('snapshot', JSON.stringify(buildPersistedSnapshot()));
+        await fetch(syncState.config.endpoint, {
+            method: 'POST',
+            mode: 'no-cors',
+            body
+        });
+    }
+
+    function handleSharedConflict(meta) {
+        const revision = String((meta && meta.revision) || '');
+        const previousConflictRevision = syncState.lastConflictRevision;
+        syncState.lastConflictRevision = revision || syncState.lastConflictRevision;
+        const updated = formatSyncTime(meta && meta.updatedAt);
+        const by = (meta && meta.updatedBy) || '他の利用者';
+        updateSyncStatus('conflict', '', `先に共有更新があります: ${updated} / ${by}`);
+        if (revision && previousConflictRevision === revision) return;
+        alert(`他の利用者が先に共有保存しました。\n\n共有保存は中断しました。必要に応じて「共有読込」で最新状態を確認してください。\n最終更新: ${updated || '不明'} / ${by}`);
+    }
+
+    async function saveSharedData(reason) {
+        if (!isSharedSyncEnabled()) return;
+        if (syncState.saveInFlight) {
+            syncState.saveQueued = true;
+            syncState.queuedReason = reason || syncState.queuedReason || '変更';
+            return;
+        }
+        syncState.saveInFlight = true;
+        updateSyncStatus('syncing');
+        try {
+            const meta = await requestSharedJsonp({ action: 'meta' });
+            const remoteRevision = meta.empty ? '' : String(meta.revision || '');
+            const localRevision = String((syncState.remoteMeta && syncState.remoteMeta.revision) || '');
+            if (remoteRevision && remoteRevision !== localRevision) {
+                handleSharedConflict(meta);
+                return;
+            }
+
+            await postSharedSnapshot(reason, remoteRevision);
+            await new Promise(resolve => setTimeout(resolve, 1200));
+
+            const nextMeta = await requestSharedJsonp({ action: 'meta' });
+            const oldRevisionNumber = Number(remoteRevision || 0);
+            const newRevisionNumber = Number(nextMeta.revision || 0);
+            if (!nextMeta.empty && newRevisionNumber > oldRevisionNumber && nextMeta.clientId === syncState.clientId) {
+                syncState.remoteMeta = {
+                    revision: String(nextMeta.revision || ''),
+                    updatedAt: nextMeta.updatedAt || '',
+                    updatedBy: nextMeta.updatedBy || ''
+                };
+                saveRemoteMeta();
+                renderSyncStatusFromMeta();
+            } else if (!nextMeta.empty && newRevisionNumber > oldRevisionNumber) {
+                handleSharedConflict(nextMeta);
+            } else {
+                throw new Error('共有保存の完了確認ができませんでした。');
+            }
+        } catch (err) {
+            console.warn('Shared save error', err);
+            updateSyncStatus('error', '', err && err.message ? err.message : '共有保存でエラーが発生しました。');
+        } finally {
+            syncState.saveInFlight = false;
+            if (syncState.saveQueued) {
+                const queuedReason = syncState.queuedReason || '変更';
+                syncState.saveQueued = false;
+                syncState.queuedReason = '';
+                scheduleSharedSave(queuedReason);
+            }
+        }
+    }
+
+    function scheduleSharedSave(reason) {
+        if (!isSharedSyncEnabled()) return;
+        if (syncState.saveTimer) clearTimeout(syncState.saveTimer);
+        updateSyncStatus('pending');
+        syncState.saveTimer = setTimeout(() => {
+            syncState.saveTimer = null;
+            saveSharedData(reason || '変更');
+        }, 700);
+    }
+
+    function saveData(reason = '変更') {
+        saveLocalData();
+        scheduleSharedSave(reason);
+    }
+
+    async function loadSharedData(options = {}) {
+        if (!isSharedSyncEnabled()) {
+            updateSyncStatus('local');
+            return false;
+        }
+        updateSyncStatus('syncing');
+        try {
+            const result = await requestSharedJsonp({ action: 'load' });
+            if (result.empty) {
+                syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
+                saveRemoteMeta();
+                renderSyncStatusFromMeta();
+                if (!options.silent) alert('共有保存はまだ空です。この端末の内容を次回保存時に共有へ反映します。');
+                return false;
+            }
+
+            applyPersistedSnapshot(result.snapshot || {});
+            syncState.remoteMeta = {
+                revision: String(result.revision || ''),
+                updatedAt: result.updatedAt || '',
+                updatedBy: result.updatedBy || ''
+            };
+            syncState.lastConflictRevision = '';
+            saveRemoteMeta();
+            saveLocalData();
+            renderDoctors();
+            renderCalendar();
+            renderSyncStatusFromMeta();
+            if (!options.silent) alert('共有保存から最新データを読み込みました。');
+            return true;
+        } catch (err) {
+            console.warn('Shared load error', err);
+            updateSyncStatus('error', '', err && err.message ? err.message : '共有保存を読み込めませんでした。');
+            if (!options.silent) alert('共有保存を読み込めませんでした。\n\n' + (err && err.message ? err.message : err));
+            return false;
+        }
+    }
+
+    function openSyncSettings() {
+        els.syncEndpointUrl.value = syncState.config.endpoint || '';
+        els.syncAppKey.value = syncState.config.appKey || '';
+        els.syncUserName.value = syncState.config.userName || '';
+        els.syncSettingsModal.classList.remove('hidden');
+    }
+
+    function closeSyncSettings() {
+        els.syncSettingsModal.classList.add('hidden');
+    }
+
+    function saveSyncSettings() {
+        const previousConfig = syncState.config;
+        const nextConfig = normalizeSyncConfig({
+            endpoint: els.syncEndpointUrl.value,
+            appKey: els.syncAppKey.value,
+            userName: els.syncUserName.value
+        });
+        if (nextConfig.endpoint) {
+            try {
+                new URL(nextConfig.endpoint);
+            } catch (err) {
+                alert('Apps Script WebアプリURLを確認してください。');
+                return;
+            }
+        }
+        syncState.config = nextConfig;
+        if (previousConfig.endpoint !== nextConfig.endpoint || previousConfig.appKey !== nextConfig.appKey) {
+            syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
+            saveRemoteMeta();
+        }
+        writeStoredJson(STORAGE_KEYS.syncConfig, syncState.config);
+        closeSyncSettings();
+        renderSyncStatusFromMeta();
+        if (isSharedSyncEnabled()) loadSharedData({ silent: false });
+    }
+
+    function disableSyncSettings() {
+        if (!confirm('共有保存を無効化しますか？\nこの端末のローカル保存データは残ります。')) return;
+        syncState.config = normalizeSyncConfig({});
+        syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
+        writeStoredJson(STORAGE_KEYS.syncConfig, syncState.config);
+        saveRemoteMeta();
+        closeSyncSettings();
+        updateSyncStatus('local');
+    }
+
+    els.syncSettingsBtn.addEventListener('click', openSyncSettings);
+    els.closeSyncSettingsBtn.addEventListener('click', closeSyncSettings);
+    els.cancelSyncSettingsBtn.addEventListener('click', closeSyncSettings);
+    els.syncSettingsOverlay.addEventListener('click', closeSyncSettings);
+    els.saveSyncSettingsBtn.addEventListener('click', saveSyncSettings);
+    els.disableSyncSettingsBtn.addEventListener('click', disableSyncSettings);
+    els.syncRefreshBtn.addEventListener('click', () => loadSharedData({ silent: false }));
 
     // ===== Holidays & Day Types =====
     async function fetchHolidays() {
@@ -969,7 +1343,7 @@ document.addEventListener('DOMContentLoaded', () => {
         els.newDocName.value = ''; els.newDocGroup.value = '3-5年目';
         els.newDocHolidayErDay.checked = false; els.newDocOutpt.value = '';
         pendingNgDates = []; renderPendingNgs();
-        saveData(); renderDoctors(); renderCalendar();
+        saveData('医師追加'); renderDoctors(); renderCalendar();
     });
 
     function removeDoctor(id) {
@@ -981,7 +1355,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (Object.keys(state.shifts[date]).length === 0) delete state.shifts[date];
         }
-        saveData(); renderDoctors(); renderCalendar();
+        saveData('医師削除'); renderDoctors(); renderCalendar();
     }
 
     function applyFormResponseRows(rows) {
@@ -1067,7 +1441,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     : readCsvRows(evt.target.result);
                 const formRows = buildFormRowsFromAoA(rows);
                 const result = applyFormResponseRows(formRows);
-                saveData(); renderDoctors(); renderCalendar();
+                saveData('フォーム回答取込'); renderDoctors(); renderCalendar();
                 showFormImportResult(result);
             } catch (err) {
                 alert('フォーム回答を取り込めませんでした。\n\n' + (err && err.message ? err.message : err));
@@ -1082,7 +1456,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	    els.clearAllBtn.addEventListener('click', () => {
 	        if (!confirm('全データを消去しますか？')) return;
 	        state.doctors = []; state.shifts = {}; state.specialDayRules = {}; state.savedMonths = {}; state.formResponseStatus = {};
-	        saveData(); renderDoctors(); renderCalendar();
+	        saveData('全データ消去'); renderDoctors(); renderCalendar();
 	    });
 
     // ===== Rendering: Doctor List =====
@@ -1235,7 +1609,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            shifts: monthShifts,
 	            specialDayRules: monthSpecialRules
 	        };
-	        saveData();
+	        saveData('月保存');
 	        renderCalendar();
 	        alert(`${monthKey} を保存しました。\n保存した割り当て枠: ${shiftCount}件`);
 	    }
@@ -1468,7 +1842,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!els.selects[r].classList.contains('hidden') && els.selects[r].value) state.shifts[editingDateStr][r] = els.selects[r].value;
         });
         if (Object.keys(state.shifts[editingDateStr]).length === 0) delete state.shifts[editingDateStr];
-        saveData(); closeModal(); renderCalendar();
+        saveData('割り付け保存'); closeModal(); renderCalendar();
     }
 
     Object.values(els.selects).forEach(sc => sc.addEventListener('change', updateModalState));
@@ -1750,7 +2124,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const nonResponderFix = tryAssignZeroNonResponders(y, m, ld);
         made += nonResponderFix.made;
 
-        saveData(); renderCalendar();
+        saveData('自動割り振り');
+        renderCalendar();
         let msg = `${made}件割り当てました。`;
         if (skipped > 0) msg += `\n⚠️ ${skipped}枠は条件を満たす医師がおらず未割り当てです。`;
         const unassignedDoctors = state.doctors.filter(doc => getDoctorMonthlyCount(doc.id) === 0);
@@ -1946,10 +2321,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Init =====
     async function init() {
         await fetchHolidays();
+        renderSyncStatusFromMeta();
+        const loadedShared = await loadSharedData({ silent: true });
         if (state.doctors.length === 0) {
             state.doctors = buildDefaultDoctors();
+            saveData('初期医師マスタ作成');
+        } else if (!loadedShared) {
+            saveLocalData();
         }
-        saveData(); // Persist migrated data
+        renderDoctors();
         renderCalendar();
     }
     init();
