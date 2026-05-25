@@ -558,10 +558,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ngDateVal: document.getElementById('ng-date-val'),
         ngWeightVal: document.getElementById('ng-weight-val'),
         addNgBtn: document.getElementById('add-ng-btn'),
-        pendingNgList: document.getElementById('pending-ng-list'),
-        formCsvUpload: document.getElementById('form-csv-upload'),
-        clearAllBtn: document.getElementById('clear-all-data-btn'),
-        modal: document.getElementById('assignment-modal'),
+	        pendingNgList: document.getElementById('pending-ng-list'),
+	        formCsvUpload: document.getElementById('form-csv-upload'),
+        clearCurrentMonthBtn: document.getElementById('clear-current-month-btn'),
+	        clearAllBtn: document.getElementById('clear-all-data-btn'),
+	        modal: document.getElementById('assignment-modal'),
         modalOverlay: document.getElementById('modal-overlay'),
         closeModalBtn: document.getElementById('close-modal'),
         cancelAssignmentBtn: document.getElementById('cancel-assignment'),
@@ -1452,7 +1453,40 @@ document.addEventListener('DOMContentLoaded', () => {
         else reader.readAsText(file, 'UTF-8');
     });
 
-    // ===== Clear All =====
+    // ===== Clear Data =====
+    function clearCurrentMonthAssignments() {
+        const monthKey = getCurrentMonthKey();
+        const label = `${state.currentDate.getFullYear()}年${state.currentDate.getMonth() + 1}月`;
+        const shiftCount = Object.entries(state.shifts || {})
+            .filter(([dateStr]) => dateStr.startsWith(monthKey))
+            .reduce((sum, [, dayShifts]) => sum + Object.keys(dayShifts || {}).length, 0);
+        const specialRuleCount = Object.keys(state.specialDayRules || {})
+            .filter(dateStr => dateStr.startsWith(monthKey)).length;
+        const hasSavedMonth = !!(state.savedMonths && state.savedMonths[monthKey]);
+
+        const ok = confirm(
+            `${label} の割り付けだけを消去します。\n\n` +
+            `削除対象: 割り付け ${shiftCount}件 / 日種別上書き ${specialRuleCount}件 / 月保存 ${hasSavedMonth ? 'あり' : 'なし'}\n\n` +
+            '医師マスタ、フォーム回答の不可日・希望日、他の月の割り付けは残ります。\n\n' +
+            '実行しますか？'
+        );
+        if (!ok) return;
+
+        for (const dateStr of Object.keys(state.shifts || {})) {
+            if (dateStr.startsWith(monthKey)) delete state.shifts[dateStr];
+        }
+        for (const dateStr of Object.keys(state.specialDayRules || {})) {
+            if (dateStr.startsWith(monthKey)) delete state.specialDayRules[dateStr];
+        }
+        if (state.savedMonths) delete state.savedMonths[monthKey];
+
+        saveData('当月の割り付け消去');
+        renderCalendar();
+        alert(`${label} の割り付けを消去しました。`);
+    }
+
+    els.clearCurrentMonthBtn.addEventListener('click', clearCurrentMonthAssignments);
+
 	    els.clearAllBtn.addEventListener('click', () => {
 	        if (!confirm('全データを消去しますか？')) return;
 	        state.doctors = []; state.shifts = {}; state.specialDayRules = {}; state.savedMonths = {}; state.formResponseStatus = {};
