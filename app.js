@@ -80,6 +80,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const WARD_DAY_ONLY_DOCTOR_NAMES = new Set([
         '吉井 直子'
     ]);
+    const WARD_DUTY_PRIORITY_DOCTOR_NAMES = new Set([
+        '山口星一郎'
+    ]);
+    const FIXED_WEEKDAY_NG_BY_NAME = {
+        '黒川 晟': new Set([0, 1, 3]), // 日・月・水
+        '津本 一秀': new Set([1, 3]), // 月・水
+        '渡邉 陽香': new Set([1, 3, 4]) // 月・水・木
+    };
 
     // テンプレートv2「01_医師マスタ」時間外対応=〇 の56名
     const DEFAULT_DOCTORS = [
@@ -132,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: '黒川 晟', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['火', '水', '金'] },
         { name: '上田 直子', group: '部長', holidayErDayPreferred: false, outpatientDays: ['水'] },
         { name: '安部 裕子', group: '部長', holidayErDayPreferred: false, outpatientDays: ['火', '水'] },
-        { name: '山口星一郎', group: '副医長', holidayErDayPreferred: true, outpatientDays: ['火'] },
+        { name: '山口星一郎', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['火'] },
         { name: '岸 具宏', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['月', '水'] },
         { name: '椿 遥花', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
         { name: '渡邊 有史', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['木'] },
@@ -197,6 +205,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function isWardDayOnlyDoctor(doc) {
         return WARD_DAY_ONLY_DOCTOR_NAMES.has(normalizeName(doc.name));
+    }
+    function isWardDutyPriorityDoctor(doc) {
+        return WARD_DUTY_PRIORITY_DOCTOR_NAMES.has(normalizeName(doc.name));
+    }
+    function getFixedWeekdayNgDays(doc) {
+        return FIXED_WEEKDAY_NG_BY_NAME[normalizeName(doc.name)] || null;
+    }
+    function formatFixedWeekdayNgDays(doc) {
+        const days = getFixedWeekdayNgDays(doc);
+        return days ? [...days].map(dayIdx => DAY_NAMES[dayIdx]).join('・') : '';
+    }
+    function isFixedWeekdayNgDate(doc, dateObj) {
+        const days = getFixedWeekdayNgDays(doc);
+        return !!(days && dateObj && days.has(dateObj.getDay()));
     }
     function isFemaleSundayWardDaySlot(doc, dateObj, role) {
         return isFemaleDoctor(doc) && role === 'wardDay' && dateObj && dateObj.getDay() === 0;
@@ -400,6 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 holidayErDayPreferred = !!doc.canDoWeekendER;
             }
         }
+        if (isWardDutyPriorityDoctor(doc)) holidayErDayPreferred = false;
         const outpatientDays = defaultDoctor ? (defaultDoctor.outpatientDays || []) : (doc.outpatientDays || []);
         const preferredDates1 = doc.preferredDates1 || [];
         const preferredDates2 = doc.preferredDates2 || [];
@@ -1146,7 +1169,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '上限に達しています',
             '休日救急日中希望がOFFです',
             '休日救急日中は月1回が上限です',
-            '月2回が上限です',
+            '月3回が上限です',
             '今月他の当直枠があります',
             '今月他の当直枠があるため',
             '救急夜間は7年目以下',
@@ -1159,6 +1182,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '今月休日救急日中を担当済み',
             '部長は平日救急夜間に割り当て不可です',
             '吉井先生は日曜病棟日中のみ担当可能です',
+            '固定不可曜日',
             '翌日が外来です',
             '不可日(第1希望)です',
             '不可日(第2希望)です',
@@ -1179,7 +1203,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- Regular doctor ---
         const doctor = state.doctors.find(d => d.id === doctorId);
         if (!doctor) return { valid: false, error: '医師が見つかりません', warning: null };
-        if (getDoctorMonthlyCount(doctorId, dateStr) >= 2) errs.push('月2回が上限です');
+        if (getDoctorMonthlyCount(doctorId, dateStr) >= 3) errs.push('月3回が上限です');
+        if (isFixedWeekdayNgDate(doctor, dateObj)) {
+            errs.push(`固定不可曜日(${formatFixedWeekdayNgDays(doctor)})です`);
+        }
         if (isWardDayOnlyDoctor(doctor) && !isFemaleSundayWardDaySlot(doctor, dateObj, role)) {
             errs.push('吉井先生は日曜病棟日中のみ担当可能です');
         }
@@ -1505,20 +1532,22 @@ document.addEventListener('DOMContentLoaded', () => {
             li.className = 'doctor-item';
             if (isFormNonResponder(doc)) li.classList.add('doctor-missing-response');
             if (count === 0) li.classList.add('doctor-zero-count');
-            if (count >= 2) li.classList.add('doctor-max-count');
+            if (count >= 3) li.classList.add('doctor-max-count');
             const groupCls = getGroupBadgeClass(doc.group);
             let badges = `<span class="badge-group ${groupCls}">${doc.group}</span>`;
             if (doc.holidayErDayPreferred) badges += '<span class="badge-erday-pref">救急日中可</span>';
+            if (isWardDutyPriorityDoctor(doc)) badges += '<span class="badge-erday-pref">病棟優先</span>';
             if (isFormNonResponder(doc)) badges += '<span class="badge-form-missing">未回答</span>';
             const opStr = doc.outpatientDays?.length ? doc.outpatientDays.join('・') : 'なし';
             const ngCount = (doc.ngDates1 || []).length + (doc.ngDates2 || []).length + (doc.ngDates3 || []).length;
             const ngStr = ngCount > 0 ? ` / NG:${ngCount}日` : '';
+            const fixedNgStr = getFixedWeekdayNgDays(doc) ? ` / 固定NG:${formatFixedWeekdayNgDays(doc)}` : '';
             const erDayFlag = hasErDayThisMonth(doc.id) ? ' / 🚑日中済' : '';
             const noteFlag = doc.notes ? (doc.notes.includes('絶対') ? ' / 絶対備考' : ' / 備考あり') : '';
             li.innerHTML = `
                 <div class="doctor-info">
                     <span class="doctor-name">${doc.name} ${badges}</span>
-                    <span class="doctor-meta">外来: ${opStr}${ngStr}${erDayFlag}${noteFlag}</span>
+                    <span class="doctor-meta">外来: ${opStr}${ngStr}${fixedNgStr}${erDayFlag}${noteFlag}</span>
                     <span class="doctor-count">今月: ${count}回</span>
                 </div>
                 <button class="remove-doctor-btn" data-id="${doc.id}">
@@ -1896,12 +1925,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const fiscalStats = getDoctorFiscalYearDutyStats(doc.id);
         let score = count === 0
             ? 0
-            : 1000000 + (GROUP_PRIORITY[doc.group] || 0) * 100000 + count * 1000;
+            : count * 1000000 + (GROUP_PRIORITY[doc.group] || 0) * 10000;
 
         score += fiscalStats.total * 25000;
         if (isHolidaySlot) score += fiscalStats.holiday * 35000;
         if (needsFormNonResponderDuty(doc)) score -= 500000;
         if (role === 'erNight' && isPriorityErNightDoctor(doc)) score -= 50000;
+        if (isWardDutyPriorityDoctor(doc) && (role === 'wardDay' || role === 'wardNight')) score -= 120000;
         if (isWeekendPrioritySeniorDoctor(doc)) {
             if (weekend) score -= 35000;
             if (!weekend && role === 'wardNight') score += 45000;
@@ -2065,25 +2095,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.doctors.length === 0) return alert('医師を登録してください。');
         if (!confirm(
             '未割り当て枠を自動生成します。\n\n' +
-            '適用ルール:\n' +
-            '・通常医師は月1回を優先\n' +
-            '・救急日直希望○は固定枠以外の休日救急日中のみ\n' +
-            '・フォーム未回答者は月1回を最優先します\n' +
-            '・年度内（4月〜翌3月）の総当直回数が少ない医師を優先します\n' +
-            '・土日祝枠では年度内の土日祝回数が少ない医師を優先します\n' +
-            '・全員1回後の残枠は、回数より下の学年を優先\n' +
-            '・救急日中は第一希望を全体優先→第二希望→通常候補\n' +
-            '・NG第1/第2/第3希望は禁止\n' +
-            '・連続当直 / 同一週2回は禁止\n' +
-            '・月3回以上は不可（全員2回まで）\n' +
-            '・土日はどの医師も月1回まで\n' +
-            '・土曜は病棟1枠 + 救急日中/夜間の3枠です\n' +
+	            '適用ルール:\n' +
+	            '・通常医師は月1回を優先し、以降も回数が平等になるよう優先\n' +
+	            '・救急日直希望○は固定枠以外の休日救急日中のみ\n' +
+	            '・フォーム未回答者は月1回を最優先します\n' +
+	            '・年度内（4月〜翌3月）の総当直回数が少ない医師を優先します\n' +
+	            '・土日祝枠では年度内の土日祝回数が少ない医師を優先します\n' +
+	            '・全員1回後の残枠は、月内回数の少ない医師を優先\n' +
+	            '・救急日中は第一希望を全体優先→第二希望→通常候補\n' +
+	            '・NG第1/第2/第3希望は禁止\n' +
+	            '・連続当直 / 同一週2回は禁止\n' +
+	            '・月4回以上は不可（最大3回まで）\n' +
+	            '・土日はどの医師も月1回まで\n' +
+	            '・固定不可曜日は不可\n' +
+	            '・土曜は病棟1枠 + 救急日中/夜間の3枠です\n' +
             '・病棟夜間が不足する場合は6-7年目も補充候補にします\n' +
             '・非循環器の部長/副部長は土日を優先します\n' +
             '・固定女性医師8名は原則、日曜病棟日中のみ優先します\n' +
             '・吉井先生は日曜病棟日中のみ担当します\n' +
-            '・岸先生は救急夜間枠のみ担当します\n' +
-            '・平日病棟に入る部長は垣内先生・松本先生のみです\n' +
+	            '・岸先生は救急夜間枠のみ担当します\n' +
+	            '・山口先生は救急日直ではなく病棟当直を優先します\n' +
+	            '・平日病棟に入る部長は垣内先生・松本先生のみです\n' +
             '・翌日外来は夜間当直のみ禁止（日中は対象外）\n' +
             '・備考欄は自動解釈せず要確認警告として扱います'
         )) return;
