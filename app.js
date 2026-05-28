@@ -556,6 +556,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	        prevMonthBtn: document.getElementById('prev-month'),
 	        nextMonthBtn: document.getElementById('next-month'),
             syncStatus: document.getElementById('sync-status'),
+            syncSaveBtn: document.getElementById('sync-save-btn'),
             syncRefreshBtn: document.getElementById('sync-refresh-btn'),
             syncSettingsBtn: document.getElementById('sync-settings-btn'),
             syncSettingsModal: document.getElementById('sync-settings-modal'),
@@ -666,6 +667,7 @@ document.addEventListener('DOMContentLoaded', () => {
             pending: '共有保存待ち',
             syncing: '共有同期中',
             saved: message || '共有保存済',
+            'local-changed': message || '未共有変更あり',
             conflict: '他者更新あり',
             error: '共有保存エラー'
         };
@@ -674,6 +676,7 @@ document.addEventListener('DOMContentLoaded', () => {
         els.syncStatus.title = title || (enabled
             ? `共有保存: ${syncState.config.endpoint}`
             : 'この端末のブラウザ内に保存しています');
+        if (els.syncSaveBtn) els.syncSaveBtn.disabled = !enabled;
         if (els.syncRefreshBtn) els.syncRefreshBtn.disabled = !enabled;
     }
 
@@ -831,6 +834,23 @@ document.addEventListener('DOMContentLoaded', () => {
         scheduleSharedSave(reason);
     }
 
+    function saveLocalOnlyData(reason = '変更') {
+        saveLocalData();
+        if (isSharedSyncEnabled()) {
+            updateSyncStatus('local-changed', '未共有変更あり', `${reason} はこの端末に保存済みです。共有するには「共有保存」を押してください。`);
+        }
+    }
+
+    function saveSharedNow() {
+        if (!isSharedSyncEnabled()) {
+            alert('共有保存が設定されていません。');
+            return;
+        }
+        if (!confirm('現在の内容を共有保存しますか？')) return;
+        saveLocalData();
+        saveSharedData('手動共有保存');
+    }
+
     async function loadSharedData(options = {}) {
         if (!isSharedSyncEnabled()) {
             updateSyncStatus('local');
@@ -922,6 +942,7 @@ document.addEventListener('DOMContentLoaded', () => {
     els.syncSettingsOverlay.addEventListener('click', closeSyncSettings);
     els.saveSyncSettingsBtn.addEventListener('click', saveSyncSettings);
     els.disableSyncSettingsBtn.addEventListener('click', disableSyncSettings);
+    els.syncSaveBtn.addEventListener('click', saveSharedNow);
     els.syncRefreshBtn.addEventListener('click', () => loadSharedData({ silent: false }));
 
     // ===== Holidays & Day Types =====
@@ -2190,7 +2211,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const nonResponderFix = tryAssignZeroNonResponders(y, m, ld);
         made += nonResponderFix.made;
 
-        saveData('自動割り振り');
+        saveLocalOnlyData('自動割り振り');
         renderCalendar();
         let msg = `${made}件割り当てました。`;
         if (skipped > 0) msg += `\n⚠️ ${skipped}枠は条件を満たす医師がおらず未割り当てです。`;
@@ -2206,6 +2227,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const noteAssigned = state.doctors.filter(doc => doc.notes && getDoctorMonthlyCount(doc.id) > 0);
         if (noteAssigned.length > 0) {
             msg += `\n⚠️ 備考ありの割り当てがあります。カレンダーの警告を確認してください。`;
+        }
+        if (isSharedSyncEnabled()) {
+            msg += '\n\n共有保存はまだしていません。内容を確認してから、画面上部の「共有保存」を押してください。';
         }
         alert(msg);
     });
