@@ -51,6 +51,7 @@ input, select { font-family: inherit; }
 .sync-local { background: #f8fafc; color: #475569; }
 .sync-ready, .sync-saved { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
 .sync-pending, .sync-syncing { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.sync-local-changed { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
 .sync-conflict { background: #fffbeb; color: #92400e; border-color: #fcd34d; }
 .sync-error { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
 
