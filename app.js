@@ -942,7 +942,7 @@ document.addEventListener('DOMContentLoaded', () => {
     els.syncSettingsOverlay.addEventListener('click', closeSyncSettings);
     els.saveSyncSettingsBtn.addEventListener('click', saveSyncSettings);
     els.disableSyncSettingsBtn.addEventListener('click', disableSyncSettings);
-    els.syncSaveBtn.addEventListener('click', saveSharedNow);
+    if (els.syncSaveBtn) els.syncSaveBtn.addEventListener('click', saveSharedNow);
     els.syncRefreshBtn.addEventListener('click', () => loadSharedData({ silent: false }));
 
     // ===== Holidays & Day Types =====
