@@ -1190,7 +1190,6 @@ document.addEventListener('DOMContentLoaded', () => {
             '上限に達しています',
             '休日救急日中希望がOFFです',
             '休日救急日中は月1回が上限です',
-            '月3回が上限です',
             '今月他の当直枠があります',
             '今月他の当直枠があるため',
             '救急夜間は7年目以下',
@@ -1208,9 +1207,6 @@ document.addEventListener('DOMContentLoaded', () => {
             '不可日(第1希望)です',
             '不可日(第2希望)です',
             '不可日(第3希望)です',
-            '連続当直禁止',
-            '同一週にすでに当直があります',
-            '土日は月1回が上限です',
             '同日の別枠に割り当て済みです'
         ].some(token => error.includes(token));
     }
@@ -1862,7 +1858,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateModalState() {
         const issues = collectModalIssues();
-        const errs = issues.fatalErrors.concat(issues.overrideErrors);
 
         // Per-select display state
         for (const [role, sel] of Object.entries(els.selects)) {
@@ -1871,13 +1866,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!sel.value) continue;
             const chk = issues.checks[role];
             if (!chk) continue;
-            if (!chk.valid) sel.classList.add('has-warning');
+            if (!chk.valid) {
+                const isFatal = chk.error === '医師が見つかりません' || isHardRuleError(chk.error);
+                sel.classList.add(isFatal ? 'has-warning' : 'has-soft-warning');
+            }
             else if (chk.warning) sel.classList.add('has-soft-warning');
         }
 
-        if (errs.length || issues.warns.length) {
+        if (issues.fatalErrors.length || issues.overrideErrors.length || issues.warns.length) {
             els.modalWarnings.innerHTML =
-                (errs.length ? `<div class="modal-error">❌ ${errs.join('<br>')}</div>` : '') +
+                (issues.fatalErrors.length ? `<div class="modal-error">❌ 保存不可<br>${issues.fatalErrors.join('<br>')}</div>` : '') +
+                (issues.overrideErrors.length ? `<div class="modal-warnings">⚠️ 一時許可できます<br>${issues.overrideErrors.join('<br>')}</div>` : '') +
                 (issues.warns.length ? `<div class="modal-warnings">⚠️ ${issues.warns.join('<br>')}</div>` : '');
             els.modalWarnings.classList.remove('hidden');
         } else {
@@ -1895,7 +1894,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (issues.overrideErrors.length > 0) {
             const ok = confirm(
-                '以下のルール違反があります。\n例外として保存しますか？\n\n' +
+                '以下の項目は一時的な例外として保存できます。\n保存しますか？\n\n' +
                 issues.overrideErrors.join('\n')
             );
             if (!ok) return;
