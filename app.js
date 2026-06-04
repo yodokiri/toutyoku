@@ -803,7 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (!nextMeta.empty && newRevisionNumber > oldRevisionNumber) {
                 handleSharedConflict(nextMeta);
             } else {
-                throw new Error('共有保存の完了確認ができませんでした。');
+                throw new Error(nextMeta.lastError || '共有保存の完了確認ができませんでした。');
             }
         } catch (err) {
             console.warn('Shared save error', err);
