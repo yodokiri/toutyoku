@@ -55,45 +55,8 @@
 
                 <div class="sidebar-scrollable">
                     <section class="doctor-management">
-                        <!-- 医師追加フォーム -->
-                        <div class="section-header" style="border-bottom:none; padding-bottom:8px;">
-                            <h3>👨‍⚕️ 医師の新規追加</h3>
-                        </div>
-                        <form id="add-doctor-form" class="add-doctor-form">
-                            <input type="text" id="new-doctor-name" placeholder="医師名 (例: 山田 太郎)" required autocomplete="off">
-
-                            <div class="doctor-form-options">
-                                <label style="font-size:0.8rem;font-weight:600;">区分</label>
-                                <select id="new-doctor-group" style="padding:6px 10px;font-size:0.85rem;border:1px solid var(--border);border-radius:var(--radius-sm);">
-                                    <option value="3-5年目">3–5年目</option>
-                                    <option value="6-7年目">6–7年目</option>
-                                    <option value="副医長">副医長</option>
-                                    <option value="医長">医長</option>
-                                    <option value="副部長">副部長</option>
-                                    <option value="部長">部長</option>
-                                </select>
-                                <label><input type="checkbox" id="new-doctor-holiday-er-day"> 休日救急日中希望</label>
-                                <input type="text" id="new-doctor-outpatient" placeholder="外来曜日 (例: 月,水)" autocomplete="off">
-                            </div>
-
-                            <div class="ng-dates-section">
-                                <label style="font-size: 0.8rem; font-weight: 600; color: #4b5563;">不可日（NG）の設定</label>
-                                <div class="ng-input-group">
-                                    <input type="date" id="ng-date-val">
-                                    <select id="ng-weight-val">
-                                        <option value="hard">第1希望不可</option>
-                                        <option value="soft">第2希望不可</option>
-                                        <option value="soft3">第3希望不可</option>
-                                    </select>
-                                    <button type="button" id="add-ng-btn" class="btn-outline-small">+</button>
-                                </div>
-                                <ul id="pending-ng-list" class="pending-ng-list"></ul>
-                            </div>
-
-                            <button type="submit" class="btn-primary" style="width: 100%; margin-top: 8px;">追加</button>
-                        </form>
                         <!-- 登録済み医師一覧 -->
-                        <div class="doctor-list-container" style="border-top: 1px solid var(--border);">
+                        <div class="doctor-list-container">
                             <div class="section-header" style="padding-left:0;">
                                 <h3>📋 登録済み医師一覧</h3>
                             </div>

@@ -1465,6 +1465,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== NG Dates UI =====
     function renderPendingNgs() {
+        if (!els.pendingNgList) return;
         els.pendingNgList.innerHTML = '';
         const labelMap = { hard: '第1希望不可', soft: '第2希望不可', soft3: '第3希望不可' };
         pendingNgDates.forEach((ng, i) => {
@@ -1478,33 +1479,37 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    els.addNgBtn.addEventListener('click', () => {
-        const d = els.ngDateVal.value;
-        if (d) { pendingNgDates.push({ date: d, type: els.ngWeightVal.value }); els.ngDateVal.value = ''; renderPendingNgs(); }
-    });
+    if (els.addNgBtn) {
+        els.addNgBtn.addEventListener('click', () => {
+            const d = els.ngDateVal.value;
+            if (d) { pendingNgDates.push({ date: d, type: els.ngWeightVal.value }); els.ngDateVal.value = ''; renderPendingNgs(); }
+        });
+    }
 
     // ===== Doctor Management =====
-    els.addDoctorForm.addEventListener('submit', e => {
-        e.preventDefault();
-        const name = normalizeName(els.newDocName.value);
-        if (!name) return;
-        const group = els.newDocGroup.value;
-        const holidayErDayPreferred = els.newDocHolidayErDay.checked;
-        const outpt = [];
-        DAY_NAMES.forEach(d => { if (els.newDocOutpt.value.includes(d)) outpt.push(d); });
-        const ng1 = pendingNgDates.filter(n => n.type === 'hard').map(n => n.date);
-        const ng2 = pendingNgDates.filter(n => n.type === 'soft').map(n => n.date);
-        const ng3 = pendingNgDates.filter(n => n.type === 'soft3').map(n => n.date);
+    if (els.addDoctorForm) {
+        els.addDoctorForm.addEventListener('submit', e => {
+            e.preventDefault();
+            const name = normalizeName(els.newDocName.value);
+            if (!name) return;
+            const group = els.newDocGroup.value;
+            const holidayErDayPreferred = els.newDocHolidayErDay.checked;
+            const outpt = [];
+            DAY_NAMES.forEach(d => { if (els.newDocOutpt.value.includes(d)) outpt.push(d); });
+            const ng1 = pendingNgDates.filter(n => n.type === 'hard').map(n => n.date);
+            const ng2 = pendingNgDates.filter(n => n.type === 'soft').map(n => n.date);
+            const ng3 = pendingNgDates.filter(n => n.type === 'soft3').map(n => n.date);
 
-        state.doctors.push({
-            id: generateId(), name, group, outpatientDays: outpt, holidayErDayPreferred,
-            ngDates1: ng1, ngDates2: ng2, ngDates3: ng3, notes: '', preferredDates: []
+            state.doctors.push({
+                id: generateId(), name, group, outpatientDays: outpt, holidayErDayPreferred,
+                ngDates1: ng1, ngDates2: ng2, ngDates3: ng3, notes: '', preferredDates: []
+            });
+            els.newDocName.value = ''; els.newDocGroup.value = '3-5年目';
+            els.newDocHolidayErDay.checked = false; els.newDocOutpt.value = '';
+            pendingNgDates = []; renderPendingNgs();
+            saveData('医師追加'); renderDoctors(); renderCalendar();
         });
-        els.newDocName.value = ''; els.newDocGroup.value = '3-5年目';
-        els.newDocHolidayErDay.checked = false; els.newDocOutpt.value = '';
-        pendingNgDates = []; renderPendingNgs();
-        saveData('医師追加'); renderDoctors(); renderCalendar();
-    });
+    }
 
     function removeDoctor(id) {
         if (!confirm('削除しますか？')) return;
