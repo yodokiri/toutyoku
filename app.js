@@ -87,7 +87,8 @@ document.addEventListener('DOMContentLoaded', () => {
         '吉田 也恵'
     ]);
     const DUTY_EXCLUDED_DOCTOR_NAMES = new Set([
-        '椿 遥花'
+        '椿 遥花',
+        '箱谷 聡'
     ]);
     const FRIDAY_WARD_ONLY_DOCTOR_NAMES = new Set([
         '小澤牧人'
@@ -254,8 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return SATURDAY_ER_DAY_EXTRA_DOCTOR_NAMES.has(normalizeName(doc.name)) &&
             dateObj &&
             dateObj.getDay() === 6 &&
-            !isFixedErDaySaturday(dateObj) &&
-            getDoctorPreferenceRank(doc, dateStr) > 0;
+            !isFixedErDaySaturday(dateObj);
     }
     function getFixedWeekdayNgDays(doc) {
         return FIXED_WEEKDAY_NG_BY_NAME[normalizeName(doc.name)] || null;
@@ -2264,8 +2264,8 @@ document.addEventListener('DOMContentLoaded', () => {
 		            '・循環器内科は自動割り振りでは月1回までにします（手動例外可）\n' +
 		            '・山口先生は自動割り振りでは病棟当直月1回までにします（手動例外可）\n' +
 		            '・吉田也恵先生は固定女性医師ルールから外し、日中枠には入れません\n' +
-		            '・久保山先生は希望日のある土曜救急日中にも候補にします（第1・第3土曜は固定）\n' +
-		            '・椿先生は当直除外メンバーとして自動候補から外します\n' +
+			            '・久保山先生は土曜救急日中の候補にします（第1・第3土曜は固定）\n' +
+			            '・椿先生・箱谷先生は当直除外メンバーとして自動候補から外します\n' +
 		            '・小澤牧人先生は金曜病棟当直のみ候補にします\n' +
 		            '・松岡 里紗先生は手動選択のみで、自動割り振りには入れません\n' +
 		            '・平日病棟に入る部長は垣内先生・松本先生のみです\n' +
