@@ -1249,6 +1249,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return labels;
     }
 
+    function hasNoteWarning(warning) {
+        return !!warning && (warning.includes('備考に「絶対」') || warning.includes('備考あり'));
+    }
+
     function setShiftBadgeMainText(badge, text) {
         badge.textContent = '';
         const main = document.createElement('span');
@@ -1260,7 +1264,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function appendWarningLabels(badge, warning) {
         getWarningLabels(warning).forEach(label => {
             const chip = document.createElement('span');
-            chip.className = label === '絶対備考' ? 'warning-label warning-label-strong' : 'warning-label';
+            if (label === '絶対備考') chip.className = 'warning-label warning-label-strong';
+            else if (label === '備考') chip.className = 'warning-label warning-label-note';
+            else chip.className = 'warning-label';
             chip.textContent = label;
             badge.appendChild(chip);
         });
@@ -1755,6 +1761,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!rule.valid) { badge.classList.add('warning'); badge.title = rule.error; }
                         else if (rule.warning) {
                             badge.classList.add('soft-warning');
+                            if (hasNoteWarning(rule.warning)) badge.classList.add('note-warning');
                             badge.title = rule.warning;
                             appendWarningLabels(badge, rule.warning);
                         }
