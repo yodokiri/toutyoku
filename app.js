@@ -84,7 +84,8 @@ document.addEventListener('DOMContentLoaded', () => {
         '山口星一郎'
     ]);
     const FIXED_FEMALE_RULE_EXEMPT_DOCTOR_NAMES = new Set([
-        '吉田 也恵'
+        '吉田 也恵',
+        '岩田 幸代'
     ]);
     const DUTY_EXCLUDED_DOCTOR_NAMES = new Set([
         '椿 遥花',
@@ -99,6 +100,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const SATURDAY_ER_DAY_EXTRA_DOCTOR_NAMES = new Set([
         '久保山知彦'
     ]);
+    const MONTHLY_DUTY_TARGET_BY_NAME = {
+        '南部 海': 3
+    };
     const REQUIRED_EXTRA_DOCTOR_NAMES = new Set([
         '小澤牧人',
         '松岡 里紗'
@@ -251,11 +255,26 @@ document.addEventListener('DOMContentLoaded', () => {
     function isYoshidaYaeDoctor(doc) {
         return normalizeName(doc.name) === '吉田 也恵';
     }
+    function isIwataYukiyoDoctor(doc) {
+        return normalizeName(doc.name) === '岩田 幸代';
+    }
+    function isIwataPreferredRole(doc, role, dateObj, dateStr) {
+        if (!isIwataYukiyoDoctor(doc)) return false;
+        if (role === 'erDay') return true;
+        return role === 'wardNight' && dateObj && !isHoliday(dateObj, dateStr);
+    }
     function canDoSaturdayErDayExtraDoctor(doc, dateObj, dateStr) {
         return SATURDAY_ER_DAY_EXTRA_DOCTOR_NAMES.has(normalizeName(doc.name)) &&
             dateObj &&
             dateObj.getDay() === 6 &&
             !isFixedErDaySaturday(dateObj);
+    }
+    function canDoErDaySpecialDoctor(doc, dateObj, dateStr) {
+        return canDoSaturdayErDayExtraDoctor(doc, dateObj, dateStr) ||
+            isIwataPreferredRole(doc, 'erDay', dateObj, dateStr);
+    }
+    function getMonthlyDutyTarget(doc) {
+        return MONTHLY_DUTY_TARGET_BY_NAME[normalizeName(doc.name)] || 1;
     }
     function getFixedWeekdayNgDays(doc) {
         return FIXED_WEEKDAY_NG_BY_NAME[normalizeName(doc.name)] || null;
@@ -285,9 +304,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return (doc.group === '副部長' || doc.group === '部長' || doc.group === '副部長以上') && !isCardiologyDoctor(doc);
     }
     function canDoWardDayDoctor(doc) {
-        return !isFridayWardOnlyDoctor(doc) && isSeniorGroup(doc.group) && !isPriorityErNightDoctor(doc);
+        return !isIwataYukiyoDoctor(doc) && !isFridayWardOnlyDoctor(doc) && isSeniorGroup(doc.group) && !isPriorityErNightDoctor(doc);
     }
     function canDoWardNightPrimaryDoctor(doc, dateObj, dateStr) {
+        if (isIwataPreferredRole(doc, 'wardNight', dateObj, dateStr)) return true;
         return isSeniorGroup(doc.group) &&
             !isPriorityErNightDoctor(doc) &&
             (doc.group !== '部長' || canWeekdayWardNightChief(doc, dateObj, dateStr));
@@ -1293,6 +1313,8 @@ document.addEventListener('DOMContentLoaded', () => {
             '当直除外メンバーです',
             '吉田也恵先生は日中枠に割り当て不可です',
             '小澤牧人先生は金曜病棟当直のみ可能です',
+            '小澤牧人先生は月1回までです',
+            '岩田先生は平日病棟当直または救急日直のみ可能です',
             '固定不可曜日',
             '翌日が外来です',
             '不可日(第1希望)です',
@@ -1328,8 +1350,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isYoshidaYaeDoctor(doctor) && (role === 'wardDay' || role === 'erDay')) {
             errs.push('吉田也恵先生は日中枠に割り当て不可です');
         }
+        if (isIwataYukiyoDoctor(doctor) && !isIwataPreferredRole(doctor, role, dateObj, dateStr)) {
+            errs.push('岩田先生は平日病棟当直または救急日直のみ可能です');
+        }
         if (isFridayWardOnlyDoctor(doctor) && !(role === 'wardNight' && dateObj.getDay() === 5)) {
             errs.push('小澤牧人先生は金曜病棟当直のみ可能です');
+        }
+        if (isFridayWardOnlyDoctor(doctor) && monthlyCount >= 1) {
+            errs.push('小澤牧人先生は月1回までです');
         }
         if (isFixedWeekdayNgDate(doctor, dateObj)) {
             errs.push(`固定不可曜日(${formatFixedWeekdayNgDays(doctor)})です`);
@@ -1341,7 +1369,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 1. Role-Group constraints
         if (!manualOnly) {
             if (role === 'erDay') {
-                if (!doctor.holidayErDayPreferred && !canDoSaturdayErDayExtraDoctor(doctor, dateObj, dateStr)) {
+                if (!doctor.holidayErDayPreferred && !canDoErDaySpecialDoctor(doctor, dateObj, dateStr)) {
                     errs.push('休日救急日中希望がOFFです');
                 }
                 // Monthly erDay limit (1回)
@@ -1676,9 +1704,11 @@ document.addEventListener('DOMContentLoaded', () => {
 	            let badges = `<span class="badge-group ${groupCls}">${doc.group}</span>`;
 	            if (doc.holidayErDayPreferred) badges += '<span class="badge-erday-pref">救急日中可</span>';
 	            if (isWardDutyPriorityDoctor(doc)) badges += '<span class="badge-erday-pref">病棟優先</span>';
-	            if (isDutyExcludedDoctor(doc)) badges += '<span class="badge-form-missing">当直除外</span>';
-	            if (isFridayWardOnlyDoctor(doc)) badges += '<span class="badge-erday-pref">金曜病棟のみ</span>';
-	            if (isManualOnlyDoctor(doc)) badges += '<span class="badge-form-missing">手動のみ</span>';
+		            if (isDutyExcludedDoctor(doc)) badges += '<span class="badge-form-missing">当直除外</span>';
+		            if (isFridayWardOnlyDoctor(doc)) badges += '<span class="badge-erday-pref">金曜病棟のみ</span>';
+		            if (getMonthlyDutyTarget(doc) > 1) badges += `<span class="badge-erday-pref">月${getMonthlyDutyTarget(doc)}目標</span>`;
+		            if (isIwataYukiyoDoctor(doc)) badges += '<span class="badge-erday-pref">平日病棟/救日</span>';
+		            if (isManualOnlyDoctor(doc)) badges += '<span class="badge-form-missing">手動のみ</span>';
 	            if (isFormNonResponder(doc)) badges += '<span class="badge-form-missing">未回答</span>';
             const opStr = doc.outpatientDays?.length ? doc.outpatientDays.join('・') : 'なし';
             const ngCount = (doc.ngDates1 || []).length + (doc.ngDates2 || []).length + (doc.ngDates3 || []).length;
@@ -1843,7 +1873,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            if (role === 'erDay') {
 	                const eligible = state.doctors.filter(d =>
                         isAutoAssignableDoctor(d) &&
-                        (d.holidayErDayPreferred || canDoSaturdayErDayExtraDoctor(d, editingDateObj, editingDateStr))
+                        (d.holidayErDayPreferred || canDoErDaySpecialDoctor(d, editingDateObj, editingDateStr))
                     );
 	                if (eligible.length > 0) {
 	                    const og2 = document.createElement('optgroup');
@@ -2078,10 +2108,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const isSunday = dateObj.getDay() === 0;
         const isHolidaySlot = isHoliday(dateObj, dateStr);
         const fiscalStats = getDoctorFiscalYearDutyStats(doc.id);
+        const monthlyTarget = getMonthlyDutyTarget(doc);
         let score = count === 0
             ? 0
             : count * 1000000 + (GROUP_PRIORITY[doc.group] || 0) * 10000;
 
+        if (monthlyTarget > 1 && count < monthlyTarget) score -= (monthlyTarget - count) * 2250000;
+        if (count === 0 && isIwataPreferredRole(doc, role, dateObj, dateStr)) score -= 450000;
         score += fiscalStats.total * 25000;
         if (isHolidaySlot) score += fiscalStats.holiday * 35000;
         if (needsFormNonResponderDuty(doc)) score -= 500000;
@@ -2128,7 +2161,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            const candidates = state.doctors.filter(doc => {
                     if (!isAutoAssignableDoctor(doc)) return false;
 	                if (!needsFormNonResponderDuty(doc)) return false;
-	                if (!doc.holidayErDayPreferred && !canDoSaturdayErDayExtraDoctor(doc, dObj, dStr)) return false;
+	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
 	                if (!canAutoAssignFixedFemaleDoctor(doc, dObj, 'erDay')) return false;
 	                const chk = checkAssignmentRule(doc.id, 'erDay', dObj);
 	                return chk.valid;
@@ -2153,7 +2186,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 	            const candidates = state.doctors.filter(doc => {
                     if (!isAutoAssignableDoctor(doc)) return false;
-	                if (!doc.holidayErDayPreferred && !canDoSaturdayErDayExtraDoctor(doc, dObj, dStr)) return false;
+	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
 	                if (!canAutoAssignFixedFemaleDoctor(doc, dObj, 'erDay')) return false;
 	                if (getDoctorPreferenceRank(doc, dStr) !== preferenceRank) return false;
 	                const chk = checkAssignmentRule(doc.id, 'erDay', dObj);
@@ -2179,7 +2212,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 	            const candidates = state.doctors.filter(doc => {
                     if (!isAutoAssignableDoctor(doc)) return false;
-	                if (!doc.holidayErDayPreferred && !canDoSaturdayErDayExtraDoctor(doc, dObj, dStr)) return false;
+	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
 	                if (!canAutoAssignFixedFemaleDoctor(doc, dObj, 'erDay')) return false;
 	                if (getDoctorPreferenceRank(doc, dStr) !== 0) return false;
 	                const chk = checkAssignmentRule(doc.id, 'erDay', dObj);
@@ -2278,8 +2311,10 @@ document.addEventListener('DOMContentLoaded', () => {
 		            '・吉田也恵先生は固定女性医師ルールから外し、日中枠には入れません\n' +
 			            '・久保山先生は土曜救急日中の候補にします（第1・第3土曜は固定）\n' +
 			            '・椿先生・箱谷先生は当直除外メンバーとして自動候補から外します\n' +
-		            '・小澤牧人先生は金曜病棟当直のみ候補にします\n' +
-		            '・松岡 里紗先生は手動選択のみで、自動割り振りには入れません\n' +
+			            '・小澤牧人先生は金曜病棟当直のみ、月1回まで候補にします\n' +
+			            '・南部先生は月3回を目標に優先します（最大3回まで）\n' +
+			            '・岩田先生は循環器月1回を優先し、平日病棟当直または救急日直に候補を絞ります\n' +
+			            '・松岡 里紗先生は手動選択のみで、自動割り振りには入れません\n' +
 		            '・平日病棟に入る部長は垣内先生・松本先生のみです\n' +
             '・翌日外来は夜間当直のみ禁止（日中は対象外）\n' +
             '・備考欄は自動解釈せず要確認警告として扱います'
