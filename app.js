@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
         wardDay: '🏥病棟(日中)', wardNight: '🏥病棟(夜間)',
         erDay: '🚑救急(日中)', erNight: '🚑救急(夜間)'
     };
+    const ROLE_ORDER = ['wardDay', 'wardNight', 'erDay', 'erNight'];
     const DEPARTMENT_BY_NAME = {
         '久保山知彦': 'ﾘｳﾏﾁ膠原病内科',
         '焦 圭裕': 'ﾘｳﾏﾁ膠原病内科',
@@ -122,6 +123,20 @@ document.addEventListener('DOMContentLoaded', () => {
         '津本 一秀': new Set([1, 3]), // 月・水
         '渡邉 陽香': new Set([1, 3, 4]) // 月・水・木
     };
+    const FIXED_EXTERNAL_DUTY_NAMES = new Set(['救急医']);
+    const FIXED_SPECIAL_DUTIES_BY_DATE = {
+        '2026-09-19': { erDay: ['救急医'], erNight: ['南部 海'], wardNight: ['岸 具宏'] },
+        '2026-09-20': { erDay: ['薮内 寛幸'], erNight: ['中島 康哉'], wardDay: ['竹重 遼'], wardNight: ['丹羽諒太郎'] },
+        '2026-09-21': { erDay: ['上野 裕美子'], erNight: ['西岡 唯'], wardDay: ['水本 綾', '松井 佐織'], wardNight: ['池田 響'] },
+        '2026-09-22': { erDay: ['藤岡周太郎'], erNight: ['渡邉 陽香'], wardDay: ['岩田 幸代', '金 容壱'], wardNight: ['久保山知彦'] },
+        '2026-09-23': { erDay: ['救急医'], erNight: ['堀川 真衣'], wardDay: ['吉井 直子', '大谷賢一郎'], wardNight: ['春山 忠佑'] },
+        '2026-12-29': { erDay: ['今中 友香'], wardDay: ['吉井 直子', '大谷賢一郎'], wardNight: ['吉田竜太郎'] },
+        '2026-12-30': { erDay: ['梁間 敢'], wardDay: ['西島 正剛', '田中 康史'], wardNight: ['近藤 和也'] },
+        '2026-12-31': { erDay: ['三木 秀晃'], wardDay: ['佐々木 諭', '松本 大典'], wardNight: ['黒川 晟'] },
+        '2027-01-01': { erDay: ['古田 寛人'], wardDay: ['藤田 光一', '山口星一郎'], wardNight: ['上野 峻輔'] },
+        '2027-01-02': { erDay: ['焦 圭裕'], wardDay: ['金 容壱', '水本 綾'], wardNight: ['竹重 遼'] },
+        '2027-01-03': { erDay: ['救急医'], wardDay: ['岩根 成豪', '北村 泰明'], wardNight: ['丹羽諒太郎'] }
+    };
 
     // テンプレートv2「01_医師マスタ」時間外対応=〇 の56名 + 新規/臨時2名
     const DEFAULT_DOCTORS = [
@@ -234,6 +249,100 @@ document.addEventListener('DOMContentLoaded', () => {
     function normalizeDoctorMatchName(n) { return normalizeName(n).replace(/\s+/g, ''); }
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
     function getDepartmentByName(name) { return DEPARTMENT_BY_NAME[normalizeName(name)] || ''; }
+    function parseDateStr(dateStr) {
+        const [yy, mm, dd] = String(dateStr || '').split('-').map(Number);
+        if (!yy || !mm || !dd) return null;
+        return new Date(yy, mm - 1, dd);
+    }
+    function getFixedSpecialDuties(dateStr) {
+        return FIXED_SPECIAL_DUTIES_BY_DATE[dateStr] || null;
+    }
+    function isFixedSpecialDutyDate(dateStr) {
+        return !!getFixedSpecialDuties(dateStr);
+    }
+    function getFixedSpecialDutyEntries(dateStr, role) {
+        const duties = getFixedSpecialDuties(dateStr);
+        return duties && Array.isArray(duties[role]) ? duties[role] : [];
+    }
+    function isFixedSpecialDutyRole(dateStr, role) {
+        return getFixedSpecialDutyEntries(dateStr, role).length > 0;
+    }
+    function getFixedSpecialDutyRoles(dateStr) {
+        const duties = getFixedSpecialDuties(dateStr);
+        if (!duties) return [];
+        return ROLE_ORDER.filter(role => getFixedSpecialDutyEntries(dateStr, role).length > 0);
+    }
+    function isExternalFixedDutyName(name) {
+        return FIXED_EXTERNAL_DUTY_NAMES.has(normalizeName(name));
+    }
+    function findDoctorByName(name) {
+        const target = normalizeDoctorMatchName(name);
+        return state.doctors.find(doc => normalizeDoctorMatchName(doc.name) === target) || null;
+    }
+    function getFixedDutyDoctorId(name) {
+        if (!name || isExternalFixedDutyName(name)) return null;
+        const doc = findDoctorByName(name);
+        return doc ? doc.id : null;
+    }
+    function getFixedDutyDoctorIds(dateStr, role = null) {
+        const roles = role ? [role] : getFixedSpecialDutyRoles(dateStr);
+        const ids = [];
+        roles.forEach(r => {
+            getFixedSpecialDutyEntries(dateStr, r).forEach(name => {
+                const id = getFixedDutyDoctorId(name);
+                if (id) ids.push(id);
+            });
+        });
+        return ids;
+    }
+    function getFixedDutyDisplayNames(dateStr, role) {
+        return getFixedSpecialDutyEntries(dateStr, role).map(name => {
+            const doc = isExternalFixedDutyName(name) ? null : findDoctorByName(name);
+            return doc ? doc.name : name;
+        });
+    }
+    function getAssignedDoctorIdsForDate(dateStr, excludeRole = null) {
+        const ids = [];
+        const dayShifts = getShiftForDate(dateStr);
+        for (const [role, val] of Object.entries(dayShifts)) {
+            if (role === excludeRole || isFixedSpecialDutyRole(dateStr, role)) continue;
+            if (val) ids.push(val);
+        }
+        getFixedSpecialDutyRoles(dateStr).forEach(role => {
+            if (role === excludeRole) return;
+            ids.push(...getFixedDutyDoctorIds(dateStr, role));
+        });
+        return ids;
+    }
+    function forEachFixedDutyEntry(callback) {
+        for (const [dateStr, duties] of Object.entries(FIXED_SPECIAL_DUTIES_BY_DATE)) {
+            const dateObj = parseDateStr(dateStr);
+            for (const [role, names] of Object.entries(duties || {})) {
+                (names || []).forEach(name => {
+                    callback({ dateStr, dateObj, role, name, doctorId: getFixedDutyDoctorId(name) });
+                });
+            }
+        }
+    }
+    function countFixedDutiesForDoctor(doctorId, predicate = null) {
+        let count = 0;
+        forEachFixedDutyEntry(entry => {
+            if (entry.doctorId !== doctorId) return;
+            if (!predicate || predicate(entry.dateStr, entry.dateObj, entry.role)) count++;
+        });
+        return count;
+    }
+    function formatFixedDutyRoleSummary(dateStr, role) {
+        const names = getFixedDutyDisplayNames(dateStr, role);
+        if (names.length === 0) return '';
+        return `${ROLE_LABELS[role]}: ${names.join('・')}`;
+    }
+    function formatFixedDutySummary(dateStr) {
+        return getFixedSpecialDutyRoles(dateStr)
+            .map(role => formatFixedDutyRoleSummary(dateStr, role))
+            .filter(Boolean)
+            .join(' / ');
+    }
     function isCardiologyDoctor(doc) {
         return (doc.department || getDepartmentByName(doc.name)) === '循環器内科';
     }
@@ -1081,9 +1190,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getRequiredRoles(dateObj, dateStr) {
         const isHol = isHoliday(dateObj, dateStr);
-        if (!isHol) return ['wardNight', 'erNight'];
-        if (dateObj.getDay() === 6) return ['wardNight', 'erDay', 'erNight'];
-        return ['wardDay', 'wardNight', 'erDay', 'erNight'];
+        const baseRoles = !isHol
+            ? ['wardNight', 'erNight']
+            : (dateObj.getDay() === 6 ? ['wardNight', 'erDay', 'erNight'] : ['wardDay', 'wardNight', 'erDay', 'erNight']);
+        const roleSet = new Set(baseRoles);
+        getFixedSpecialDutyRoles(dateStr).forEach(role => roleSet.add(role));
+        return ROLE_ORDER.filter(role => roleSet.has(role));
     }
 
     function getRoleLabelForDayType(role, dateObj, isHol) {
@@ -1126,8 +1238,9 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const [dateStr, dayShifts] of Object.entries(shifts || {})) {
             const [yy, mm, dd] = String(dateStr).split('-').map(Number);
             const dateObj = new Date(yy, (mm || 1) - 1, dd || 1);
-            const isHol = isHolidayWithRules(dateObj, dateStr, specialRules);
-            for (const val of Object.values(dayShifts || {})) {
+            const isHol = isHolidayWithRules(dateObj, dateStr, specialRules) || isFixedSpecialDutyDate(dateStr);
+            for (const [role, val] of Object.entries(dayShifts || {})) {
+                if (isFixedSpecialDutyRole(dateStr, role)) continue;
                 if (val === doctorId) {
                     stats.total++;
                     if (isHol) stats.holiday++;
@@ -1154,7 +1267,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         Object.assign(combinedSpecialRules, state.specialDayRules || {});
 
-        return countShiftEntriesForDoctor(combinedShifts, doctorId, combinedSpecialRules);
+        const stats = countShiftEntriesForDoctor(combinedShifts, doctorId, combinedSpecialRules);
+        forEachFixedDutyEntry(({ dateStr, dateObj, doctorId: fixedDoctorId }) => {
+            if (fixedDoctorId !== doctorId) return;
+            if (!isMonthKeyInFiscalYear(getMonthKeyFromDateStr(dateStr), fiscalStartYear)) return;
+            stats.total++;
+            if (isHolidayWithRules(dateObj, dateStr, combinedSpecialRules) || isFixedSpecialDutyDate(dateStr)) stats.holiday++;
+        });
+        return stats;
     }
 
     function getCurrentFormResponseStatus() {
@@ -1193,9 +1313,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (excludeDate && ds === excludeDate) continue;
             const sd = new Date(ds);
             if (sd.getFullYear() === y && sd.getMonth() === m) {
-                for (const val of Object.values(sh)) { if (val === doctorId) count++; }
+                for (const [role, val] of Object.entries(sh)) {
+                    if (isFixedSpecialDutyRole(ds, role)) continue;
+                    if (val === doctorId) count++;
+                }
             }
         }
+        count += countFixedDutiesForDoctor(doctorId, (ds, sd) =>
+            (!excludeDate || ds !== excludeDate) &&
+            sd.getFullYear() === y &&
+            sd.getMonth() === m
+        );
         return count;
     }
 
@@ -1208,9 +1336,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const sd = new Date(ds);
             if (sd.getFullYear() !== y || sd.getMonth() !== m) continue;
             for (const [role, val] of Object.entries(sh)) {
+                if (isFixedSpecialDutyRole(ds, role)) continue;
                 if (roleSet.has(role) && val === doctorId) count++;
             }
         }
+        count += countFixedDutiesForDoctor(doctorId, (ds, sd, role) =>
+            (!excludeDate || ds !== excludeDate) &&
+            sd.getFullYear() === y &&
+            sd.getMonth() === m &&
+            roleSet.has(role)
+        );
         return count;
     }
 
@@ -1219,9 +1354,14 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const [ds, sh] of Object.entries(state.shifts)) {
             if (excludeDate && ds === excludeDate) continue;
             const sd = new Date(ds);
-            if (sd.getFullYear() === y && sd.getMonth() === m && sh.erDay === doctorId) return true;
+            if (sd.getFullYear() === y && sd.getMonth() === m && !isFixedSpecialDutyRole(ds, 'erDay') && sh.erDay === doctorId) return true;
         }
-        return false;
+        return countFixedDutiesForDoctor(doctorId, (ds, sd, role) =>
+            (!excludeDate || ds !== excludeDate) &&
+            sd.getFullYear() === y &&
+            sd.getMonth() === m &&
+            role === 'erDay'
+        ) > 0;
     }
 
     function isWeekendDate(dateObj) {
@@ -1236,11 +1376,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (excludeDate && ds === excludeDate) continue;
             const sd = new Date(ds);
             if (sd.getFullYear() === y && sd.getMonth() === m && isWeekendDate(sd)) {
-                for (const val of Object.values(sh)) {
+                for (const [role, val] of Object.entries(sh)) {
+                    if (isFixedSpecialDutyRole(ds, role)) continue;
                     if (val === doctorId) count++;
                 }
             }
         }
+        count += countFixedDutiesForDoctor(doctorId, (ds, sd) =>
+            (!excludeDate || ds !== excludeDate) &&
+            sd.getFullYear() === y &&
+            sd.getMonth() === m &&
+            isWeekendDate(sd)
+        );
         return count;
     }
 
@@ -1251,11 +1398,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const sd = new Date(ds);
             if (sd.getFullYear() === y && sd.getMonth() === m) {
                 for (const [role, val] of Object.entries(sh)) {
+                    if (isFixedSpecialDutyRole(ds, role)) continue;
                     if (role !== 'erDay' && val === doctorId) return true;
                 }
             }
         }
-        return false;
+        return countFixedDutiesForDoctor(doctorId, (ds, sd, role) =>
+            (!excludeDate || ds !== excludeDate) &&
+            sd.getFullYear() === y &&
+            sd.getMonth() === m &&
+            role !== 'erDay'
+        ) > 0;
     }
 
     function findDoctorName(id) {
@@ -1464,8 +1617,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 4. Consecutive shifts
         const prevDay = new Date(dateObj); prevDay.setDate(prevDay.getDate() - 1);
         const nextDay2 = new Date(dateObj); nextDay2.setDate(nextDay2.getDate() + 1);
-	        if (Object.values(getShiftForDate(formatDateStr(prevDay))).includes(doctorId)) errs.push('前日も当直です（連続当直禁止）');
-	        if (Object.values(getShiftForDate(formatDateStr(nextDay2))).includes(doctorId)) errs.push('翌日も当直です（連続当直禁止）');
+	        if (getAssignedDoctorIdsForDate(formatDateStr(prevDay)).includes(doctorId)) errs.push('前日も当直です（連続当直禁止）');
+	        if (getAssignedDoctorIdsForDate(formatDateStr(nextDay2)).includes(doctorId)) errs.push('翌日も当直です（連続当直禁止）');
 
         // 5. Same week 2x
         const weekStart = new Date(dateObj);
@@ -1476,14 +1629,13 @@ document.addEventListener('DOMContentLoaded', () => {
             wd.setDate(weekStart.getDate() + i);
             const wds = formatDateStr(wd);
             if (wds === dateStr) continue;
-	            if (Object.values(getShiftForDate(wds)).includes(doctorId)) weekCount++;
+	            if (getAssignedDoctorIdsForDate(wds).includes(doctorId)) weekCount++;
         }
         if (weekCount >= 1) errs.push('同一週にすでに当直があります（週2回禁止）');
 
         // 6. Same-day duplicate (against saved state)
-        const dayShifts = state.shifts[dateStr] || {};
-        for (const [r, id] of Object.entries(dayShifts)) {
-            if (r !== role && id === doctorId) { errs.push('同日の別枠に割り当て済みです'); break; }
+        if (getAssignedDoctorIdsForDate(dateStr, role).includes(doctorId)) {
+            errs.push('同日の別枠に割り当て済みです');
         }
 
         return {
@@ -1497,6 +1649,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const issues = [];
         const dayShifts = state.shifts[dateStr] || {};
         getRequiredRoles(dateObj, dateStr).forEach(role => {
+            if (isFixedSpecialDutyRole(dateStr, role)) return;
             if (role === 'erDay' && isActiveFixedErDaySaturday(dateObj)) return;
             const doctorId = dayShifts[role];
             if (!doctorId) return;
@@ -1778,6 +1931,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (dObj.getDay() === 6) dayDiv.classList.add('sat');
             if (state.holidays[dStr]) dayDiv.classList.add('hol');
             if (state.specialDayRules[dStr] === 'holiday') dayDiv.classList.add('hol');
+            if (isFixedSpecialDutyDate(dStr)) dayDiv.classList.add('has-fixed-duty');
             if (isCurr && d === td.getDate()) dayDiv.classList.add('today');
 
             const holName = state.holidays[dStr] || '';
@@ -1793,6 +1947,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 exceptionLabel.title = exceptionIssues.join(' / ');
                 dayDiv.querySelector('.day-number').appendChild(exceptionLabel);
             }
+            if (isFixedSpecialDutyDate(dStr)) {
+                const fixedLabel = document.createElement('span');
+                fixedLabel.className = 'fixed-duty-label';
+                fixedLabel.textContent = '固定';
+                fixedLabel.title = formatFixedDutySummary(dStr);
+                dayDiv.querySelector('.day-number').appendChild(fixedLabel);
+            }
 
             const cont = document.createElement('div'); cont.className = 'shift-slots';
             const roles = getRequiredRoles(dObj, dStr);
@@ -1801,6 +1962,14 @@ document.addEventListener('DOMContentLoaded', () => {
             roles.forEach(role => {
                 const badge = document.createElement('div');
                 badge.className = `shift-badge ${role}`;
+                if (isFixedSpecialDutyRole(dStr, role)) {
+                    const names = getFixedDutyDisplayNames(dStr, role);
+                    badge.classList.add('fixed-duty');
+                    setShiftBadgeMainText(badge, `${getRoleLabel(role, dObj, dStr)}: 固定 ${names.join('・')}`);
+                    badge.title = 'シルバーウィーク・年末年始の固定担当です';
+                    cont.appendChild(badge);
+                    return;
+                }
                 // 第1・第3土曜の救急日中は救急医固定
                 if (role === 'erDay' && isActiveFixedErDaySaturday(dObj)) {
                     badge.textContent = `${getRoleLabel(role, dObj, dStr)}: 救急医固定`;
@@ -1961,6 +2130,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let roles = !isHol
             ? ['wardNight', 'erNight']
             : (editingDateObj.getDay() === 6 ? ['wardNight', 'erDay', 'erNight'] : ['wardDay', 'wardNight', 'erDay', 'erNight']);
+        roles = ROLE_ORDER.filter(role => roles.includes(role) || isFixedSpecialDutyRole(editingDateStr, role));
+        roles = roles.filter(role => !isFixedSpecialDutyRole(editingDateStr, role));
         // 第1・第3土曜の救急日中は固定 → セレクト非表示
         const fixedErDay = editingDateObj && isHol && isActiveFixedErDaySaturday(editingDateObj);
         if (fixedErDay) roles = roles.filter(r => r !== 'erDay');
@@ -1998,10 +2169,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function openModal(dObj, dStr) {
         editingDateStr = dStr; editingDateObj = dObj;
         els.modalDateDisplay.textContent = `${dObj.getFullYear()}/${dObj.getMonth() + 1}/${dObj.getDate()} (${DAY_NAMES[dObj.getDay()]})`;
+        if (isFixedSpecialDutyDate(dStr)) {
+            const fixedNote = document.createElement('span');
+            fixedNote.className = 'fixed-duty-modal-note';
+            fixedNote.textContent = `固定: ${formatFixedDutySummary(dStr)}`;
+            els.modalDateDisplay.appendChild(document.createElement('br'));
+            els.modalDateDisplay.appendChild(fixedNote);
+        }
         els.selectDayType.value = state.specialDayRules[dStr] || '';
         updateModalRoles();
         const dS = state.shifts[dStr] || {};
-        const roles = getRequiredRoles(dObj, dStr);
+        const roles = getRequiredRoles(dObj, dStr).filter(role => !isFixedSpecialDutyRole(dStr, role));
         roles.forEach(r => { if (els.selects[r]) els.selects[r].value = dS[r] || ''; });
         updateModalState();
         els.modal.classList.remove('hidden');
@@ -2099,6 +2277,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let roles = !isHol
             ? ['wardNight', 'erNight']
             : (editingDateObj.getDay() === 6 ? ['wardNight', 'erDay', 'erNight'] : ['wardDay', 'wardNight', 'erDay', 'erNight']);
+        roles = ROLE_ORDER.filter(role => roles.includes(role) || isFixedSpecialDutyRole(editingDateStr, role));
+        roles = roles.filter(role => !isFixedSpecialDutyRole(editingDateStr, role));
         if (isHol && isActiveFixedErDaySaturday(editingDateObj)) roles = roles.filter(r => r !== 'erDay');
 
         if (!state.shifts[editingDateStr]) state.shifts[editingDateStr] = {};
@@ -2108,7 +2288,8 @@ document.addEventListener('DOMContentLoaded', () => {
         delete state.shifts[editingDateStr].erDay;
         delete state.shifts[editingDateStr].erNight;
         roles.forEach(r => {
-            if (!els.selects[r].classList.contains('hidden') && els.selects[r].value) state.shifts[editingDateStr][r] = els.selects[r].value;
+            const group = els.selects[r].closest('.form-group');
+            if (!group.classList.contains('hidden') && !els.selects[r].classList.contains('hidden') && els.selects[r].value) state.shifts[editingDateStr][r] = els.selects[r].value;
         });
         if (Object.keys(state.shifts[editingDateStr]).length === 0) delete state.shifts[editingDateStr];
         saveData('割り付け保存'); closeModal(); renderCalendar();
@@ -2168,6 +2349,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dObj = new Date(y, m, d), dStr = formatDateStr(dObj);
             if (!isHoliday(dObj, dStr)) continue;
             if (isActiveFixedErDaySaturday(dObj)) continue; // 第1・第3土曜は救急医固定（9/19-9/23は例外）
+            if (isFixedSpecialDutyRole(dStr, 'erDay')) continue;
             dates.push({ dObj, dStr });
         }
         return dates;
@@ -2275,6 +2457,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!state.shifts[dStr]) state.shifts[dStr] = {};
 
                     for (const role of roles) {
+                        if (isFixedSpecialDutyRole(dStr, role)) continue;
                         if (role === 'erDay' && isActiveFixedErDaySaturday(dObj)) continue;
                         const currentId = state.shifts[dStr][role];
                         if (currentId === doc.id) { assigned = true; break; }
@@ -2282,7 +2465,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         const original = currentId || null;
                         if (original) delete state.shifts[dStr][role];
-                        if (Object.values(state.shifts[dStr]).includes(doc.id)) {
+                        if (getAssignedDoctorIdsForDate(dStr, role).includes(doc.id)) {
                             if (original) state.shifts[dStr][role] = original;
                             continue;
                         }
@@ -2310,6 +2493,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            '適用ルール:\n' +
 	            '・通常医師は月1回を優先し、以降も回数が平等になるよう優先\n' +
 	            '・救急日直希望○は固定枠以外の休日救急日中のみ\n' +
+	            '・シルバーウィーク・年末年始の固定表は表示と回数に反映し、自動割り振りでは上書きしません\n' +
 	            '・フォーム未回答者は月1回を最優先します\n' +
 	            '・年度内（4月〜翌3月）の総当直回数が少ない医師を優先します\n' +
 	            '・土日祝枠では年度内の土日祝回数が少ない医師を優先します\n' +
@@ -2360,9 +2544,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const dObj = new Date(y, m, d), dStr = formatDateStr(dObj);
             const roles = getRequiredRoles(dObj, dStr).filter(r => r !== 'erDay');
             if (!state.shifts[dStr]) state.shifts[dStr] = {};
-            const assignedToday = new Set(Object.values(state.shifts[dStr]).filter(Boolean));
+            const assignedToday = new Set(getAssignedDoctorIdsForDate(dStr));
 
             for (const role of roles) {
+                if (isFixedSpecialDutyRole(dStr, role)) continue;
                 if (state.shifts[dStr][role]) continue;
 
 	                let candidates = state.doctors.filter(doc => {
@@ -2470,37 +2655,54 @@ document.addEventListener('DOMContentLoaded', () => {
 	            const isSaturdayHoliday = isHol && dObj.getDay() === 6;
 	            const shifts = state.shifts[dStr] || {};
 	            const lines = [];
-	            const erDayName = isActiveFixedErDaySaturday(dObj) ? '固定' : n(shifts.erDay);
+	            const namesForRole = role => {
+	                const fixedNames = getFixedDutyDisplayNames(dStr, role);
+	                if (fixedNames.length > 0) return fixedNames;
+	                if (role === 'erDay' && isActiveFixedErDaySaturday(dObj)) return ['固定'];
+	                return shifts[role] ? [n(shifts[role])] : [];
+	            };
+	            const wardDayNames = namesForRole('wardDay');
+	            const wardNightNames = namesForRole('wardNight');
+	            const erDayNames = namesForRole('erDay');
+	            const erNightNames = namesForRole('erNight');
+	            const wardDayText = wardDayNames.join('・');
+	            const wardNightText = wardNightNames.join('・');
+	            const erDayText = erDayNames.join('・');
+	            const erNightText = erNightNames.join('・');
 
 	            if (mode === 'ward') {
 	                if (isSaturdayHoliday) {
-	                    if (shifts.wardNight) lines.push(n(shifts.wardNight));
+	                    if (wardNightText) lines.push(wardNightText);
 	                } else if (isHol) {
-	                    if (shifts.wardDay) lines.push(`日 ${n(shifts.wardDay)}`);
-	                    if (shifts.wardNight) lines.push(`夜 ${n(shifts.wardNight)}`);
-	                } else if (shifts.wardNight) {
-	                    lines.push(n(shifts.wardNight));
+	                    if (wardDayText) lines.push(`日 ${wardDayText}`);
+	                    if (wardNightText) lines.push(`夜 ${wardNightText}`);
+	                } else {
+	                    if (wardDayText) lines.push(`日 ${wardDayText}`);
+	                    if (wardNightText) lines.push(wardNightText);
 	                }
 	            } else if (mode === 'er') {
 	                if (isHol) {
-	                    if (erDayName) lines.push(`日 ${erDayName}`);
-	                    if (shifts.erNight) lines.push(`夜 ${n(shifts.erNight)}`);
-	                } else if (shifts.erNight) {
-	                    lines.push(n(shifts.erNight));
+	                    if (erDayText) lines.push(`日 ${erDayText}`);
+	                    if (erNightText) lines.push(`夜 ${erNightText}`);
+	                } else {
+	                    if (erDayText) lines.push(`日 ${erDayText}`);
+	                    if (erNightText) lines.push(erNightText);
 	                }
 	            } else {
 	                if (isSaturdayHoliday) {
-	                    if (shifts.wardNight) lines.push(`病 ${n(shifts.wardNight)}`);
-	                    if (erDayName) lines.push(`救日 ${erDayName}`);
-	                    if (shifts.erNight) lines.push(`救夜 ${n(shifts.erNight)}`);
+	                    if (wardNightText) lines.push(`病 ${wardNightText}`);
+	                    if (erDayText) lines.push(`救日 ${erDayText}`);
+	                    if (erNightText) lines.push(`救夜 ${erNightText}`);
 	                } else if (isHol) {
-	                    if (shifts.wardDay) lines.push(`病日 ${n(shifts.wardDay)}`);
-	                    if (shifts.wardNight) lines.push(`病夜 ${n(shifts.wardNight)}`);
-	                    if (erDayName) lines.push(`救日 ${erDayName}`);
-	                    if (shifts.erNight) lines.push(`救夜 ${n(shifts.erNight)}`);
+	                    if (wardDayText) lines.push(`病日 ${wardDayText}`);
+	                    if (wardNightText) lines.push(`病夜 ${wardNightText}`);
+	                    if (erDayText) lines.push(`救日 ${erDayText}`);
+	                    if (erNightText) lines.push(`救夜 ${erNightText}`);
 	                } else {
-	                    if (shifts.wardNight) lines.push(`病 ${n(shifts.wardNight)}`);
-	                    if (shifts.erNight) lines.push(`救 ${n(shifts.erNight)}`);
+	                    if (wardDayText) lines.push(`病日 ${wardDayText}`);
+	                    if (wardNightText) lines.push(`病 ${wardNightText}`);
+	                    if (erDayText) lines.push(`救日 ${erDayText}`);
+	                    if (erNightText) lines.push(`救 ${erNightText}`);
 	                }
 	            }
 
