@@ -677,6 +677,77 @@ document.addEventListener('DOMContentLoaded', () => {
         return out;
     }
 
+    function migrateFormResponseRecord(record) {
+        const preferredDates1 = Array.isArray(record && record.preferredDates1) ? record.preferredDates1 : [];
+        const preferredDates2 = Array.isArray(record && record.preferredDates2) ? record.preferredDates2 : [];
+        return {
+            doctorName: (record && record.doctorName) || '',
+            preferredDates1,
+            preferredDates2,
+            preferredDates: [...new Set([
+                ...preferredDates1,
+                ...preferredDates2,
+                ...((record && record.preferredDates) || [])
+            ])],
+            ngDates1: Array.isArray(record && record.ngDates1) ? record.ngDates1 : [],
+            ngDates2: Array.isArray(record && record.ngDates2) ? record.ngDates2 : [],
+            ngDates3: Array.isArray(record && record.ngDates3) ? record.ngDates3 : [],
+            notes: (record && record.notes) || ''
+        };
+    }
+
+    function migrateFormResponsesByMonth(formResponsesByMonth) {
+        const out = {};
+        for (const [monthKey, snapshot] of Object.entries(formResponsesByMonth || {})) {
+            const responses = {};
+            Object.entries((snapshot && snapshot.responses) || {}).forEach(([nameKey, record]) => {
+                responses[nameKey] = migrateFormResponseRecord(record);
+            });
+            out[monthKey] = {
+                importedAt: (snapshot && snapshot.importedAt) || '',
+                responders: Array.isArray(snapshot && snapshot.responders) ? snapshot.responders : [],
+                duplicateNames: Array.isArray(snapshot && snapshot.duplicateNames) ? snapshot.duplicateNames : [],
+                notFound: Array.isArray(snapshot && snapshot.notFound) ? snapshot.notFound : [],
+                responses
+            };
+        }
+        return out;
+    }
+
+    function buildLegacyMonthlyFormResponses(doctors, formResponseStatus) {
+        const statuses = Object.entries(formResponseStatus || {})
+            .filter(([, status]) => status && Array.isArray(status.responders) && status.responders.length > 0)
+            .sort((a, b) => String((b[1] && b[1].importedAt) || '').localeCompare(String((a[1] && a[1].importedAt) || '')));
+        if (statuses.length === 0) return {};
+
+        const [monthKey, status] = statuses[0];
+        const responderSet = new Set((status.responders || []).map(normalizeDoctorMatchName));
+        const responses = {};
+        doctors.forEach(doc => {
+            if (!responderSet.has(normalizeDoctorMatchName(doc.name))) return;
+            const record = migrateFormResponseRecord({
+                doctorName: doc.name,
+                preferredDates1: doc.preferredDates1 || [],
+                preferredDates2: doc.preferredDates2 || [],
+                preferredDates: doc.preferredDates || [],
+                ngDates1: doc.ngDates1 || [],
+                ngDates2: doc.ngDates2 || [],
+                ngDates3: doc.ngDates3 || [],
+                notes: doc.notes || ''
+            });
+            responses[normalizeDoctorMatchName(doc.name)] = record;
+        });
+        return {
+            [monthKey]: {
+                importedAt: status.importedAt || '',
+                responders: status.responders || [],
+                duplicateNames: status.duplicateNames || [],
+                notFound: status.notFound || [],
+                responses
+            }
+        };
+    }
+
     // ===== State =====
     let pendingNgDates = [];
     let editingDateStr = null;
@@ -688,6 +759,7 @@ document.addEventListener('DOMContentLoaded', () => {
         specialDayRules: 'specialDayRules',
         savedMonths: 'savedMonths',
         formResponseStatus: 'formResponseStatus',
+        formResponsesByMonth: 'formResponsesByMonth',
         syncConfig: 'sharedSaveConfig',
         syncClientId: 'sharedSaveClientId',
         syncRemoteMeta: 'sharedSaveRemoteMeta'
@@ -717,12 +789,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function loadLocalSnapshot() {
         const rawDoctors = readStoredJson(STORAGE_KEYS.doctors, []);
+        const doctors = (Array.isArray(rawDoctors) ? rawDoctors : []).map(migrateDoctor);
+        const formResponseStatus = readStoredJson(STORAGE_KEYS.formResponseStatus, {}) || {};
+        const storedMonthlyResponses = migrateFormResponsesByMonth(readStoredJson(STORAGE_KEYS.formResponsesByMonth, {}) || {});
         return {
-            doctors: (Array.isArray(rawDoctors) ? rawDoctors : []).map(migrateDoctor),
+            doctors,
             shifts: migrateShifts(readStoredJson(STORAGE_KEYS.shifts, {}) || {}),
             specialDayRules: readStoredJson(STORAGE_KEYS.specialDayRules, {}) || {},
             savedMonths: migrateSavedMonths(readStoredJson(STORAGE_KEYS.savedMonths, {}) || {}),
-            formResponseStatus: readStoredJson(STORAGE_KEYS.formResponseStatus, {}) || {}
+            formResponseStatus,
+            formResponsesByMonth: Object.keys(storedMonthlyResponses).length > 0
+                ? storedMonthlyResponses
+                : buildLegacyMonthlyFormResponses(doctors, formResponseStatus)
         };
     }
 
@@ -735,7 +813,8 @@ document.addEventListener('DOMContentLoaded', () => {
         holidays: {},
         specialDayRules: localSnapshot.specialDayRules,
         savedMonths: localSnapshot.savedMonths,
-        formResponseStatus: localSnapshot.formResponseStatus
+        formResponseStatus: localSnapshot.formResponseStatus,
+        formResponsesByMonth: localSnapshot.formResponsesByMonth
     };
 
     function ensureRequiredExtraDoctors() {
@@ -824,13 +903,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Persistence =====
     function buildPersistedSnapshot() {
         return {
-            schemaVersion: 2,
+            schemaVersion: 3,
             savedAt: new Date().toISOString(),
             doctors: state.doctors,
             shifts: state.shifts,
             specialDayRules: state.specialDayRules,
             savedMonths: state.savedMonths,
-            formResponseStatus: state.formResponseStatus
+            formResponseStatus: state.formResponseStatus,
+            formResponsesByMonth: state.formResponsesByMonth
         };
     }
 
@@ -841,6 +921,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.specialDayRules = snapshot.specialDayRules || {};
         state.savedMonths = migrateSavedMonths(snapshot.savedMonths || {});
         state.formResponseStatus = snapshot.formResponseStatus || {};
+        state.formResponsesByMonth = migrateFormResponsesByMonth(snapshot.formResponsesByMonth || {});
     }
 
     function saveLocalData() {
@@ -849,6 +930,7 @@ document.addEventListener('DOMContentLoaded', () => {
         writeStoredJson(STORAGE_KEYS.specialDayRules, state.specialDayRules);
         writeStoredJson(STORAGE_KEYS.savedMonths, state.savedMonths);
         writeStoredJson(STORAGE_KEYS.formResponseStatus, state.formResponseStatus);
+        writeStoredJson(STORAGE_KEYS.formResponsesByMonth, state.formResponsesByMonth);
     }
 
     function saveRemoteMeta() {
@@ -1278,7 +1360,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getCurrentFormResponseStatus() {
-        return state.formResponseStatus[getCurrentMonthKey()] || null;
+        const monthKey = getCurrentMonthKey();
+        const monthly = state.formResponsesByMonth && state.formResponsesByMonth[monthKey];
+        if (monthly) {
+            return {
+                importedAt: monthly.importedAt || '',
+                responders: monthly.responders || [],
+                duplicateNames: monthly.duplicateNames || [],
+                notFound: monthly.notFound || []
+            };
+        }
+        return state.formResponseStatus[monthKey] || null;
     }
 
     function hasFormResponseStatus() {
@@ -1304,6 +1396,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function needsFormNonResponderDuty(doc) {
         return isFormNonResponder(doc) && getDoctorMonthlyCount(doc.id) === 0;
+    }
+
+    function getDoctorLegacyFormData(doc) {
+        const preferredDates1 = doc.preferredDates1 || [];
+        const preferredDates2 = doc.preferredDates2 || [];
+        return {
+            preferredDates1,
+            preferredDates2,
+            preferredDates: [...new Set([
+                ...preferredDates1,
+                ...preferredDates2,
+                ...(doc.preferredDates || [])
+            ])],
+            ngDates1: doc.ngDates1 || [],
+            ngDates2: doc.ngDates2 || [],
+            ngDates3: doc.ngDates3 || [],
+            notes: doc.notes || ''
+        };
+    }
+
+    function getEmptyFormData() {
+        return {
+            preferredDates1: [],
+            preferredDates2: [],
+            preferredDates: [],
+            ngDates1: [],
+            ngDates2: [],
+            ngDates3: [],
+            notes: ''
+        };
+    }
+
+    function getDoctorFormDataForMonth(doc, monthKey = getCurrentMonthKey()) {
+        const monthly = state.formResponsesByMonth && state.formResponsesByMonth[monthKey];
+        if (monthly && monthly.responses) {
+            return monthly.responses[normalizeDoctorMatchName(doc.name)] || getEmptyFormData();
+        }
+        return getDoctorLegacyFormData(doc);
+    }
+
+    function getDoctorFormDataForDate(doc, dateStr) {
+        return getDoctorFormDataForMonth(doc, dateStr ? getMonthKeyFromDateStr(dateStr) : getCurrentMonthKey());
     }
 
     function getDoctorMonthlyCount(doctorId, excludeDate) {
@@ -1419,14 +1553,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getDoctorPreferenceRank(doc, dateStr) {
-        if ((doc.preferredDates1 || []).includes(dateStr)) return 1;
-        if ((doc.preferredDates2 || []).includes(dateStr)) return 2;
-        if ((doc.preferredDates || []).includes(dateStr)) return 2;
+        const formData = getDoctorFormDataForDate(doc, dateStr);
+        if ((formData.preferredDates1 || []).includes(dateStr)) return 1;
+        if ((formData.preferredDates2 || []).includes(dateStr)) return 2;
+        if ((formData.preferredDates || []).includes(dateStr)) return 2;
         return 0;
     }
 
-    function getDoctorNoteWarning(doc) {
-        const note = (doc.notes || '').trim();
+    function getDoctorNoteWarning(doc, dateStr = null) {
+        const formData = getDoctorFormDataForDate(doc, dateStr);
+        const note = (formData.notes || '').trim();
         if (!note) return null;
         const compact = note.replace(/\s+/g, ' ');
         const shortNote = compact.length > 80 ? compact.slice(0, 80) + '...' : compact;
@@ -1600,9 +1736,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 3. NG Dates
-        const ng1 = doctor.ngDates1 || [];
-        const ng2 = doctor.ngDates2 || [];
-        const ng3 = doctor.ngDates3 || [];
+        const formData = getDoctorFormDataForDate(doctor, dateStr);
+        const ng1 = formData.ngDates1 || [];
+        const ng2 = formData.ngDates2 || [];
+        const ng3 = formData.ngDates3 || [];
         if (ng1.includes(dateStr)) errs.push('不可日(第1希望)です');
         else if (ng2.includes(dateStr)) errs.push('不可日(第2希望)です');
         else if (ng3.includes(dateStr)) errs.push('不可日(第3希望)です');
@@ -1611,7 +1748,7 @@ document.addEventListener('DOMContentLoaded', () => {
             warns.push('固定女性医師は原則、日曜病棟日中のみです');
         }
 
-        const noteWarning = getDoctorNoteWarning(doctor);
+        const noteWarning = getDoctorNoteWarning(doctor, dateStr);
         if (noteWarning) warns.push(noteWarning);
 
         // 4. Consecutive shifts
@@ -1747,14 +1884,21 @@ document.addEventListener('DOMContentLoaded', () => {
             latestByName.set(normalizedN, { doc, row });
         });
 
-        latestByName.forEach(({ doc, row }) => {
-            doc.preferredDates1 = parseImportDateList(row.preferred1, y, m);
-            doc.preferredDates2 = parseImportDateList(row.preferred2, y, m);
-            doc.preferredDates = [...new Set([...doc.preferredDates1, ...doc.preferredDates2])];
-            doc.ngDates1 = parseImportDateList(row.ng1, y, m);
-            doc.ngDates2 = parseImportDateList(row.ng2, y, m);
-            doc.ngDates3 = parseImportDateList(row.ng3, y, m);
-            doc.notes = cleanImportCell(row.notes);
+        const monthKey = getCurrentMonthKey();
+        const responses = {};
+        latestByName.forEach(({ doc, row }, normalizedName) => {
+            const preferredDates1 = parseImportDateList(row.preferred1, y, m);
+            const preferredDates2 = parseImportDateList(row.preferred2, y, m);
+            responses[normalizedName] = {
+                doctorName: doc.name,
+                preferredDates1,
+                preferredDates2,
+                preferredDates: [...new Set([...preferredDates1, ...preferredDates2])],
+                ngDates1: parseImportDateList(row.ng1, y, m),
+                ngDates2: parseImportDateList(row.ng2, y, m),
+                ngDates3: parseImportDateList(row.ng3, y, m),
+                notes: cleanImportCell(row.notes)
+            };
         });
 
         const duplicateNames = [...responseCounts.entries()]
@@ -1767,14 +1911,22 @@ document.addEventListener('DOMContentLoaded', () => {
             !isManualOnlyDoctor(doc) &&
             !responderSet.has(normalizeDoctorMatchName(doc.name))
         );
-        state.formResponseStatus[getCurrentMonthKey()] = {
+        state.formResponsesByMonth[monthKey] = {
             importedAt: new Date().toISOString(),
+            responders,
+            duplicateNames,
+            notFound,
+            responses
+        };
+        state.formResponseStatus[monthKey] = {
+            importedAt: state.formResponsesByMonth[monthKey].importedAt,
             responders,
             duplicateNames,
             notFound
         };
 
         return {
+            monthKey,
             updated: latestByName.size,
             duplicateNames,
             notFound,
@@ -1783,7 +1935,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showFormImportResult(result) {
-        let msg = `${result.updated}名のフォーム回答を更新しました。`;
+        let msg = `${result.monthKey} のフォーム回答を更新しました。`;
+        msg += `\n更新: ${result.updated}名`;
         msg += '\n外来曜日はアプリ内医師マスタを使用します。';
         msg += `\n\n回答済み: ${result.updated}名`;
         msg += `\n未回答: ${result.missingDoctors.length}名`;
@@ -1857,7 +2010,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 	    els.clearAllBtn.addEventListener('click', () => {
 	        if (!confirm('全データを消去しますか？')) return;
-	        state.doctors = []; state.shifts = {}; state.specialDayRules = {}; state.savedMonths = {}; state.formResponseStatus = {};
+	        state.doctors = []; state.shifts = {}; state.specialDayRules = {}; state.savedMonths = {}; state.formResponseStatus = {}; state.formResponsesByMonth = {};
 	        saveData('全データ消去'); renderDoctors(); renderCalendar();
 	    });
 
@@ -1883,13 +2036,14 @@ document.addEventListener('DOMContentLoaded', () => {
 		            if (getMonthlyDutyTarget(doc) > 1) badges += `<span class="badge-erday-pref">月${getMonthlyDutyTarget(doc)}目標</span>`;
 		            if (isIwataYukiyoDoctor(doc)) badges += '<span class="badge-erday-pref">平日病棟/救日</span>';
 		            if (isManualOnlyDoctor(doc)) badges += '<span class="badge-form-missing">手動のみ</span>';
-	            if (isFormNonResponder(doc)) badges += '<span class="badge-form-missing">未回答</span>';
+            if (isFormNonResponder(doc)) badges += '<span class="badge-form-missing">未回答</span>';
             const opStr = doc.outpatientDays?.length ? doc.outpatientDays.join('・') : 'なし';
-            const ngCount = (doc.ngDates1 || []).length + (doc.ngDates2 || []).length + (doc.ngDates3 || []).length;
+            const formData = getDoctorFormDataForMonth(doc);
+            const ngCount = (formData.ngDates1 || []).length + (formData.ngDates2 || []).length + (formData.ngDates3 || []).length;
             const ngStr = ngCount > 0 ? ` / NG:${ngCount}日` : '';
             const fixedNgStr = getFixedWeekdayNgDays(doc) ? ` / 固定NG:${formatFixedWeekdayNgDays(doc)}` : '';
             const erDayFlag = hasErDayThisMonth(doc.id) ? ' / 🚑日中済' : '';
-            const noteFlag = doc.notes ? (doc.notes.includes('絶対') ? ' / 絶対備考' : ' / 備考あり') : '';
+            const noteFlag = formData.notes ? (formData.notes.includes('絶対') ? ' / 絶対備考' : ' / 備考あり') : '';
             li.innerHTML = `
                 <div class="doctor-info">
                     <span class="doctor-name">${doc.name} ${badges}</span>
@@ -1910,7 +2064,11 @@ document.addEventListener('DOMContentLoaded', () => {
 	    function renderCalendar() {
 	        const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth();
 	        const monthKey = getMonthKey(state.currentDate);
-	        els.currentMonthDisplay.innerHTML = `${y}年 ${m + 1}月${state.savedMonths[monthKey] ? ' <span class="saved-month-badge">保存済</span>' : ''}`;
+            const savedBadge = state.savedMonths[monthKey] ? ' <span class="saved-month-badge">保存済</span>' : '';
+            const formBadge = state.formResponsesByMonth && state.formResponsesByMonth[monthKey]
+                ? ' <span class="form-month-badge">フォーム済</span>'
+                : '';
+	        els.currentMonthDisplay.innerHTML = `${y}年 ${m + 1}月${savedBadge}${formBadge}`;
         els.calendarGrid.innerHTML = '';
         const fd = new Date(y, m, 1), ld = new Date(y, m + 1, 0);
         const td = new Date();
@@ -2336,8 +2494,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (prefRank === 1) score -= 30000;
         else if (prefRank === 2) score -= 15000;
 
-        if ((doc.ngDates2 || []).includes(dateStr)) score += 60000;
-        else if ((doc.ngDates3 || []).includes(dateStr)) score += 30000;
+        const formData = getDoctorFormDataForDate(doc, dateStr);
+        if ((formData.ngDates2 || []).includes(dateStr)) score += 60000;
+        else if ((formData.ngDates3 || []).includes(dateStr)) score += 30000;
 
         score += Math.random() * 100;
         return score;
@@ -2612,7 +2771,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (unassignedNonResponders.length > 0) {
             msg += `\n⚠️ フォーム未回答で月1回未達: ${unassignedNonResponders.length}名\n${unassignedNonResponders.map(d => d.name).join('、')}`;
         }
-        const noteAssigned = state.doctors.filter(doc => doc.notes && getDoctorMonthlyCount(doc.id) > 0);
+        const noteAssigned = state.doctors.filter(doc =>
+            getDoctorFormDataForMonth(doc).notes && getDoctorMonthlyCount(doc.id) > 0
+        );
         if (noteAssigned.length > 0) {
             msg += `\n⚠️ 備考ありの割り当てがあります。カレンダーの警告を確認してください。`;
         }
