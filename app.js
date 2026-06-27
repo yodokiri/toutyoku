@@ -108,6 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '上野 峻輔',
         '近藤 和也'
     ]);
+    const WEEKEND_ER_DAY_EXTRA_START_DATE = new Date(2026, 7, 1);
     const CARDIOLOGY_MONTHLY_LIMIT_EXEMPT_DOCTOR_NAMES = new Set([
         '上野 裕美子'
     ]);
@@ -394,16 +395,27 @@ document.addEventListener('DOMContentLoaded', () => {
     function isSpecialErDayExtraDate(dateObj) {
         return !!(dateObj && dateObj.getMonth() === 8 && dateObj.getDate() >= 19 && dateObj.getDate() <= 23);
     }
+    function isExpandedWeekendErDayExtraDate(dateObj) {
+        if (!dateObj) return false;
+        const day = dateObj.getDay();
+        if (day !== 0 && day !== 6) return false;
+        const dateOnly = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+        return dateOnly >= WEEKEND_ER_DAY_EXTRA_START_DATE;
+    }
     function isActiveFixedErDaySaturday(dateObj) {
         return isFixedErDaySaturday(dateObj) && !isSpecialErDayExtraDate(dateObj);
     }
     function canDoSpecialErDayExtraDoctor(doc, dateObj) {
-        return isSpecialErDayExtraDate(dateObj) && SPECIAL_ER_DAY_EXTRA_DOCTOR_NAMES.has(normalizeName(doc.name));
+        return SPECIAL_ER_DAY_EXTRA_DOCTOR_NAMES.has(normalizeName(doc.name)) &&
+            (isSpecialErDayExtraDate(dateObj) || isExpandedWeekendErDayExtraDate(dateObj));
     }
     function canDoErDaySpecialDoctor(doc, dateObj, dateStr) {
         return canDoSaturdayErDayExtraDoctor(doc, dateObj, dateStr) ||
             canDoSpecialErDayExtraDoctor(doc, dateObj) ||
             isIwataPreferredRole(doc, 'erDay', dateObj, dateStr);
+    }
+    function isFallbackErDayCandidate(doc, dateObj, dateStr) {
+        return !doc.holidayErDayPreferred && canDoErDaySpecialDoctor(doc, dateObj, dateStr);
     }
     function getMonthlyDutyTarget(doc) {
         return MONTHLY_DUTY_TARGET_BY_NAME[normalizeName(doc.name)] || 1;
@@ -2479,6 +2491,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isHolidaySlot) score += fiscalStats.holiday * 35000;
         if (needsFormNonResponderDuty(doc)) score -= 500000;
         if (role === 'erNight' && isPriorityErNightDoctor(doc)) score -= 50000;
+        if (role === 'erDay' && isFallbackErDayCandidate(doc, dateObj, dateStr)) score += 3000000;
         if (isWardDutyPriorityDoctor(doc) && (role === 'wardDay' || role === 'wardNight')) score -= 120000;
         if (isWeekendPrioritySeniorDoctor(doc)) {
             if (weekend) score -= 35000;
@@ -2679,7 +2692,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			            '・南部先生は月3回を目標に優先します（最大3回まで）\n' +
 			            '・岩田先生は循環器月1回を優先し、平日病棟当直または救急日直に候補を絞ります\n' +
 			            '・上野裕美子先生は循環器月1回制限の対象外にします\n' +
-			            '・9/19〜9/23の救急日直は岸先生・古田先生・梁間先生・上野峻輔先生・近藤先生も候補にします\n' +
+			            '・8月以降の土日救急日中は岸先生・古田先生・梁間先生・上野峻輔先生・近藤先生も候補にします（元の救急日中候補を優先）\n' +
 			            '・松岡 里紗先生は手動選択のみで、自動割り振りには入れません\n' +
 		            '・平日病棟に入る部長は垣内先生・松本先生のみです\n' +
             '・翌日外来は夜間当直のみ禁止（日中は対象外）\n' +
