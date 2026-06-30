@@ -389,8 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function isIwataPreferredRole(doc, role, dateObj, dateStr) {
         if (!isIwataYukiyoDoctor(doc)) return false;
-        if (role === 'erDay') return true;
-        return role === 'wardNight' && dateObj && !isHoliday(dateObj, dateStr);
+        return role === 'wardNight';
     }
     function canDoSaturdayErDayExtraDoctor(doc, dateObj, dateStr) {
         return SATURDAY_ER_DAY_EXTRA_DOCTOR_NAMES.has(normalizeName(doc.name)) &&
@@ -1648,7 +1647,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '吉田也恵先生は日中枠に割り当て不可です',
             '小澤牧人先生は金曜病棟当直のみ可能です',
             '小澤牧人先生は月1回までです',
-            '岩田先生は平日病棟当直または救急日直のみ可能です',
+            '岩田先生は平日・土日祝の病棟当直のみ可能です',
             '固定不可曜日',
             '翌日が外来です',
             '不可日(第1希望)です',
@@ -1686,7 +1685,7 @@ document.addEventListener('DOMContentLoaded', () => {
             errs.push('吉田也恵先生は日中枠に割り当て不可です');
         }
         if (isIwataYukiyoDoctor(doctor) && !isIwataPreferredRole(doctor, role, dateObj, dateStr)) {
-            errs.push('岩田先生は平日病棟当直または救急日直のみ可能です');
+            errs.push('岩田先生は平日・土日祝の病棟当直のみ可能です');
         }
         if (isFridayWardOnlyDoctor(doctor) && !(role === 'wardNight' && dateObj.getDay() === 5)) {
             errs.push('小澤牧人先生は金曜病棟当直のみ可能です');
@@ -2057,7 +2056,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		            if (isDutyExcludedDoctor(doc)) badges += '<span class="badge-form-missing">当直除外</span>';
 		            if (isFridayWardOnlyDoctor(doc)) badges += '<span class="badge-erday-pref">金曜病棟のみ</span>';
 		            if (getMonthlyDutyTarget(doc) > 1) badges += `<span class="badge-erday-pref">月${getMonthlyDutyTarget(doc)}目標</span>`;
-		            if (isIwataYukiyoDoctor(doc)) badges += '<span class="badge-erday-pref">平日病棟/救日</span>';
+		            if (isIwataYukiyoDoctor(doc)) badges += '<span class="badge-erday-pref">病棟当直</span>';
 		            if (isManualOnlyDoctor(doc)) badges += '<span class="badge-form-missing">手動のみ</span>';
             if (isFormNonResponder(doc)) badges += '<span class="badge-form-missing">未回答</span>';
             const opStr = doc.outpatientDays?.length ? doc.outpatientDays.join('・') : 'なし';
@@ -2701,7 +2700,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			            '・椿先生・箱谷先生は当直除外メンバーとして自動候補から外します\n' +
 			            '・小澤牧人先生は金曜病棟当直のみ、月1回まで候補にします\n' +
 			            '・南部先生は月3回を目標に優先します（最大3回まで）\n' +
-			            '・岩田先生は循環器月1回を優先し、平日病棟当直または救急日直に候補を絞ります\n' +
+			            '・岩田先生は循環器月1回を優先し、平日・土日祝の病棟当直に候補を絞ります\n' +
 			            '・8月以降の土日救急日中は岸先生・古田先生・梁間先生・上野峻輔先生・近藤先生も候補にします（元の救急日中候補を優先）\n' +
 			            '・松岡 里紗先生は手動選択のみで、自動割り振りには入れません\n' +
 		            '・平日病棟に入る部長は垣内先生・松本先生のみです\n' +
