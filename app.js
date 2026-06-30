@@ -65,6 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '箱谷 聡': '脳血管神経内科',
         '西岡 唯': '脳血管神経内科',
         '重岡 靖': '腫瘍内科',
+        '小澤牧人': '循環器内科',
     };
     const PRIORITY_ER_NIGHT_DOCTOR_NAMES = new Set(['岸 具宏']);
     const WEEKDAY_WARD_NIGHT_CHIEF_NAMES = new Set(['垣内 誠司', '松本 大典']);
@@ -109,9 +110,12 @@ document.addEventListener('DOMContentLoaded', () => {
         '近藤 和也'
     ]);
     const WEEKEND_ER_DAY_EXTRA_START_DATE = new Date(2026, 7, 1);
-    const CARDIOLOGY_MONTHLY_LIMIT_EXEMPT_DOCTOR_NAMES = new Set([
-        '上野 裕美子'
+    const CARDIOLOGY_MONTHLY_LIMIT_ONE_DOCTOR_NAMES = new Set([
+        '小澤牧人',
+        '岩田 幸代'
     ]);
+    const CARDIOLOGY_MONTHLY_LIMIT = 2;
+    const HOLIDAY_DUTY_MONTHLY_LIMIT = 2;
     const MONTHLY_DUTY_TARGET_BY_NAME = {
         '南部 海': 3
     };
@@ -120,7 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '松岡 里紗'
     ]);
     const FIXED_WEEKDAY_NG_BY_NAME = {
-        '黒川 晟': new Set([0, 1, 3]), // 日・月・水
+        '黒川 晟': new Set([0, 1]), // 日・月（水曜外来は残すため火曜夜間は不可）
         '津本 一秀': new Set([1, 3]), // 月・水
         '渡邉 陽香': new Set([1, 3, 4]) // 月・水・木
     };
@@ -347,8 +351,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function isCardiologyDoctor(doc) {
         return (doc.department || getDepartmentByName(doc.name)) === '循環器内科';
     }
-    function isCardiologyMonthlyLimitExemptDoctor(doc) {
-        return CARDIOLOGY_MONTHLY_LIMIT_EXEMPT_DOCTOR_NAMES.has(normalizeName(doc.name));
+    function getCardiologyMonthlyLimit(doc) {
+        if (!isCardiologyDoctor(doc)) return null;
+        if (CARDIOLOGY_MONTHLY_LIMIT_ONE_DOCTOR_NAMES.has(normalizeName(doc.name))) return 1;
+        return CARDIOLOGY_MONTHLY_LIMIT;
     }
     function isPriorityErNightDoctor(doc) {
         return PRIORITY_ER_NIGHT_DOCTOR_NAMES.has(normalizeName(doc.name));
@@ -1515,13 +1521,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return day === 0 || day === 6;
     }
 
-    function getWeekendDutyCount(doctorId, excludeDate) {
+    function isHolidayDutyDate(dateObj, dateStr) {
+        return isHoliday(dateObj, dateStr) || isFixedSpecialDutyDate(dateStr);
+    }
+
+    function getHolidayDutyCount(doctorId, excludeDate) {
         let count = 0;
         const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth();
         for (const [ds, sh] of Object.entries(state.shifts)) {
             if (excludeDate && ds === excludeDate) continue;
             const sd = new Date(ds);
-            if (sd.getFullYear() === y && sd.getMonth() === m && isWeekendDate(sd)) {
+            if (sd.getFullYear() === y && sd.getMonth() === m && isHolidayDutyDate(sd, ds)) {
                 for (const [role, val] of Object.entries(sh)) {
                     if (isFixedSpecialDutyRole(ds, role)) continue;
                     if (val === doctorId) count++;
@@ -1532,7 +1542,7 @@ document.addEventListener('DOMContentLoaded', () => {
             (!excludeDate || ds !== excludeDate) &&
             sd.getFullYear() === y &&
             sd.getMonth() === m &&
-            isWeekendDate(sd)
+            isHolidayDutyDate(sd, ds)
         );
         return count;
     }
@@ -1659,10 +1669,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!doctor) return { valid: false, error: '医師が見つかりません', warning: null };
         const manualOnly = isManualOnlyDoctor(doctor);
         const monthlyCount = getDoctorMonthlyCount(doctorId, dateStr);
+        const cardiologyMonthlyLimit = getCardiologyMonthlyLimit(doctor);
         if (monthlyCount >= 3) errs.push('月3回が上限です');
         if (isDutyExcludedDoctor(doctor)) errs.push('当直除外メンバーです');
-        if (isCardiologyDoctor(doctor) && !isCardiologyMonthlyLimitExemptDoctor(doctor) && monthlyCount >= 1) {
-            errs.push('循環器内科は月1回までです（手動例外可）');
+        if (cardiologyMonthlyLimit && monthlyCount >= cardiologyMonthlyLimit) {
+            errs.push(`循環器内科は月${cardiologyMonthlyLimit}回までです（手動例外可）`);
         }
         if (
             isWardDutyPriorityDoctor(doctor) &&
@@ -1727,8 +1738,8 @@ document.addEventListener('DOMContentLoaded', () => {
             errs.push('部長は平日救急夜間に割り当て不可です');
         }
 
-        if (isWeekendDate(dateObj) && getWeekendDutyCount(doctorId, dateStr) >= 1) {
-            errs.push('土日は月1回が上限です');
+        if (isHolidayDutyDate(dateObj, dateStr) && getHolidayDutyCount(doctorId, dateStr) >= HOLIDAY_DUTY_MONTHLY_LIMIT) {
+            errs.push(`土日祝は月${HOLIDAY_DUTY_MONTHLY_LIMIT}回が上限です`);
         }
 
         // 救急日直希望○の通常医師は、救急医固定以外の休日救急日中のみ担当
@@ -2674,7 +2685,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            '・NG第1/第2/第3希望は禁止\n' +
 	            '・連続当直 / 同一週2回は禁止\n' +
 	            '・月4回以上は不可（最大3回まで）\n' +
-	            '・土日はどの医師も月1回まで\n' +
+	            '・土日祝はどの医師も月2回まで\n' +
 	            '・固定不可曜日は不可\n' +
 	            '・土曜は病棟1枠 + 救急日中/夜間の3枠です\n' +
             '・病棟夜間が不足する場合は6-7年目も補充候補にします\n' +
@@ -2683,7 +2694,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '・吉井先生は日曜病棟日中のみ担当します\n' +
 	            '・岸先生は救急夜間枠と病棟当直枠に候補として入れます\n' +
 		            '・山口先生は救急日直ではなく病棟当直を優先します\n' +
-		            '・循環器内科は自動割り振りでは月1回までにします（手動例外可）\n' +
+		            '・循環器内科は自動割り振りでは月2回までにします（小澤先生・岩田先生は月1回、手動例外可）\n' +
 		            '・山口先生は自動割り振りでは病棟当直月1回までにします（手動例外可）\n' +
 		            '・吉田也恵先生は固定女性医師ルールから外し、日中枠には入れません\n' +
 			            '・久保山先生は土曜救急日中の候補にします（第1・第3土曜は固定）\n' +
@@ -2691,7 +2702,6 @@ document.addEventListener('DOMContentLoaded', () => {
 			            '・小澤牧人先生は金曜病棟当直のみ、月1回まで候補にします\n' +
 			            '・南部先生は月3回を目標に優先します（最大3回まで）\n' +
 			            '・岩田先生は循環器月1回を優先し、平日病棟当直または救急日直に候補を絞ります\n' +
-			            '・上野裕美子先生は循環器月1回制限の対象外にします\n' +
 			            '・8月以降の土日救急日中は岸先生・古田先生・梁間先生・上野峻輔先生・近藤先生も候補にします（元の救急日中候補を優先）\n' +
 			            '・松岡 里紗先生は手動選択のみで、自動割り振りには入れません\n' +
 		            '・平日病棟に入る部長は垣内先生・松本先生のみです\n' +
