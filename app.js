@@ -978,7 +978,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ready: '共有接続中',
             pending: '共有保存待ち',
             syncing: '共有同期中',
-            saved: message || '共有保存済',
+            saved: message || '共有同期済',
             'local-changed': message || '未共有変更あり',
             conflict: '他者更新あり',
             error: '共有保存エラー'
@@ -1001,8 +1001,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const by = (syncState.remoteMeta && syncState.remoteMeta.updatedBy) || '';
         updateSyncStatus(
             syncState.remoteMeta && syncState.remoteMeta.revision ? 'saved' : 'ready',
-            updated ? `共有保存済 ${updated}` : '共有接続中',
-            by ? `最終更新: ${updated} / ${by}` : '共有保存に接続しています'
+            updated ? `共有同期済 ${updated}` : '共有接続中',
+            by ? `最終共有更新: ${updated} / ${by}` : '共有保存に接続しています'
         );
     }
 
