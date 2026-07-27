@@ -319,6 +319,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         return ids;
     }
+    function getDoctorDepartment(doc) {
+        return (doc && (doc.department || getDepartmentByName(doc.name))) || '';
+    }
+    function getAssignedDepartmentsForDate(dateStr, excludeRole = null) {
+        return new Set(getAssignedDoctorIdsForDate(dateStr, excludeRole)
+            .map(id => state.doctors.find(doc => doc.id === id))
+            .map(getDoctorDepartment)
+            .filter(Boolean));
+    }
+    function hasSameDepartmentAssignmentForDate(doc, dateStr, excludeRole = null) {
+        const department = getDoctorDepartment(doc);
+        return !!department && getAssignedDepartmentsForDate(dateStr, excludeRole).has(department);
+    }
+    function preferDifferentDepartmentCandidates(candidates, dateStr, excludeRole = null) {
+        const differentDepartmentCandidates = candidates.filter(doc =>
+            !hasSameDepartmentAssignmentForDate(doc, dateStr, excludeRole)
+        );
+        return differentDepartmentCandidates.length > 0 ? differentDepartmentCandidates : candidates;
+    }
     function forEachFixedDutyEntry(callback) {
         for (const [dateStr, duties] of Object.entries(FIXED_SPECIAL_DUTIES_BY_DATE)) {
             const dateObj = parseDateStr(dateStr);
@@ -1524,6 +1543,53 @@ document.addEventListener('DOMContentLoaded', () => {
         return isHoliday(dateObj, dateStr) || isFixedSpecialDutyDate(dateStr);
     }
 
+    function isStoredHolidayDutyDate(dateObj, dateStr) {
+        const monthKey = getMonthKeyFromDateStr(dateStr);
+        const savedMonth = state.savedMonths && state.savedMonths[monthKey];
+        const savedRules = (savedMonth && savedMonth.specialDayRules) || {};
+        const specialRules = { ...savedRules, ...(state.specialDayRules || {}) };
+        return isHolidayWithRules(dateObj, dateStr, specialRules) || isFixedSpecialDutyDate(dateStr);
+    }
+
+    function findAdjacentMonthHolidayWeekConflict(doctorId, dateObj, dateStr) {
+        if (!isStoredHolidayDutyDate(dateObj, dateStr)) return null;
+
+        const dayOfMonth = dateObj.getDate();
+        const lastDayOfMonth = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).getDate();
+        const ranges = [];
+
+        if (dayOfMonth <= 7) {
+            const previousMonthLastDay = new Date(dateObj.getFullYear(), dateObj.getMonth(), 0);
+            ranges.push({
+                direction: 'previous',
+                dates: Array.from({ length: 7 }, (_, index) => {
+                    const date = new Date(previousMonthLastDay);
+                    date.setDate(previousMonthLastDay.getDate() - index);
+                    return date;
+                })
+            });
+        }
+        if (dayOfMonth > lastDayOfMonth - 7) {
+            ranges.push({
+                direction: 'next',
+                dates: Array.from({ length: 7 }, (_, index) =>
+                    new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, index + 1)
+                )
+            });
+        }
+
+        for (const range of ranges) {
+            for (const adjacentDate of range.dates) {
+                const adjacentDateStr = formatDateStr(adjacentDate);
+                if (!isStoredHolidayDutyDate(adjacentDate, adjacentDateStr)) continue;
+                if (getAssignedDoctorIdsForDate(adjacentDateStr).includes(doctorId)) {
+                    return { direction: range.direction, dateStr: adjacentDateStr };
+                }
+            }
+        }
+        return null;
+    }
+
     function getHolidayDutyCount(doctorId, excludeDate) {
         let count = 0;
         const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth();
@@ -1653,6 +1719,8 @@ document.addEventListener('DOMContentLoaded', () => {
             '不可日(第1希望)です',
             '不可日(第2希望)です',
             '不可日(第3希望)です',
+            '前月最終週の休日にも当直があります',
+            '翌月第一週の休日にも当直があります',
             '同日の別枠に割り当て済みです'
         ].some(token => error.includes(token));
     }
@@ -1779,7 +1847,15 @@ document.addEventListener('DOMContentLoaded', () => {
 	        if (getAssignedDoctorIdsForDate(formatDateStr(prevDay)).includes(doctorId)) errs.push('前日も当直です（連続当直禁止）');
 	        if (getAssignedDoctorIdsForDate(formatDateStr(nextDay2)).includes(doctorId)) errs.push('翌日も当直です（連続当直禁止）');
 
-        // 5. Same week 2x
+        // 5. Avoid holiday duty in both the last 7 days of one month and first 7 days of the next month
+        const adjacentHolidayConflict = findAdjacentMonthHolidayWeekConflict(doctorId, dateObj, dateStr);
+        if (adjacentHolidayConflict && adjacentHolidayConflict.direction === 'previous') {
+            errs.push(`前月最終週の休日にも当直があります（${adjacentHolidayConflict.dateStr}、月またぎ休日連続禁止）`);
+        } else if (adjacentHolidayConflict && adjacentHolidayConflict.direction === 'next') {
+            errs.push(`翌月第一週の休日にも当直があります（${adjacentHolidayConflict.dateStr}、月またぎ休日連続禁止）`);
+        }
+
+        // 6. Same week 2x
         const weekStart = new Date(dateObj);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay());
         let weekCount = 0;
@@ -1792,9 +1868,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (weekCount >= 1) errs.push('同一週にすでに当直があります（週2回禁止）');
 
-        // 6. Same-day duplicate (against saved state)
+        // 7. Same-day duplicate (against saved state)
         if (getAssignedDoctorIdsForDate(dateStr, role).includes(doctorId)) {
             errs.push('同日の別枠に割り当て済みです');
+        }
+
+        if (hasSameDepartmentAssignmentForDate(doctor, dateStr, role)) {
+            warns.push(`同じ日に同じ科（${getDoctorDepartment(doctor)}）の医師が割り当てられています`);
         }
 
         return {
@@ -2385,6 +2465,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 fatalErrors.push(`${n || id} が複数枠に割り当てられています`);
             }
         }
+        const selectedDepartments = {};
+        for (const id of Object.keys(selectedMap)) {
+            const doctor = state.doctors.find(doc => doc.id === id);
+            const department = getDoctorDepartment(doctor);
+            if (!department) continue;
+            if (!selectedDepartments[department]) selectedDepartments[department] = [];
+            selectedDepartments[department].push(doctor.name);
+        }
+        for (const [department, names] of Object.entries(selectedDepartments)) {
+            if (names.length > 1) {
+                warns.push(`同じ科（${department}）の医師が同日に入っています: ${names.join('・')}`);
+            }
+        }
         for (const [role, sel] of Object.entries(els.selects)) {
             if (sel.closest('.form-group').classList.contains('hidden') || sel.classList.contains('hidden') || !sel.value) continue;
             const chk = checkAssignmentRule(sel.value, role, editingDateObj);
@@ -2543,7 +2636,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.shifts[dStr]) state.shifts[dStr] = {};
             if (state.shifts[dStr].erDay) return;
 
-	            const candidates = state.doctors.filter(doc => {
+	            let candidates = state.doctors.filter(doc => {
                     if (!isAutoAssignableDoctor(doc)) return false;
 	                if (!needsFormNonResponderDuty(doc)) return false;
 	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
@@ -2553,7 +2646,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }).map(doc => ({
                 doc,
                 score: scoreDoctorForAutoAssign(doc, dStr, 'erDay')
-            })).sort((a, b) => a.score - b.score);
+            }));
+            const preferredCandidates = preferDifferentDepartmentCandidates(
+                candidates.map(candidate => candidate.doc),
+                dStr,
+                'erDay'
+            );
+            const preferredIds = new Set(preferredCandidates.map(doc => doc.id));
+            candidates = candidates
+                .filter(candidate => preferredIds.has(candidate.doc.id))
+                .sort((a, b) => a.score - b.score);
 
             if (candidates.length > 0) {
                 state.shifts[dStr].erDay = candidates[0].doc.id;
@@ -2569,7 +2671,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.shifts[dStr]) state.shifts[dStr] = {};
             if (state.shifts[dStr].erDay) return;
 
-	            const candidates = state.doctors.filter(doc => {
+	            let candidates = state.doctors.filter(doc => {
                     if (!isAutoAssignableDoctor(doc)) return false;
 	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
 	                if (!canAutoAssignFixedFemaleDoctor(doc, dObj, 'erDay')) return false;
@@ -2579,7 +2681,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }).map(doc => ({
                 doc,
                 score: scoreDoctorForAutoAssign(doc, dStr, 'erDay')
-            })).sort((a, b) => a.score - b.score);
+            }));
+            const preferredCandidates = preferDifferentDepartmentCandidates(
+                candidates.map(candidate => candidate.doc),
+                dStr,
+                'erDay'
+            );
+            const preferredIds = new Set(preferredCandidates.map(doc => doc.id));
+            candidates = candidates
+                .filter(candidate => preferredIds.has(candidate.doc.id))
+                .sort((a, b) => a.score - b.score);
 
             if (candidates.length > 0) {
                 state.shifts[dStr].erDay = candidates[0].doc.id;
@@ -2595,7 +2706,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.shifts[dStr]) state.shifts[dStr] = {};
             if (state.shifts[dStr].erDay) return;
 
-	            const candidates = state.doctors.filter(doc => {
+	            let candidates = state.doctors.filter(doc => {
                     if (!isAutoAssignableDoctor(doc)) return false;
 	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
 	                if (!canAutoAssignFixedFemaleDoctor(doc, dObj, 'erDay')) return false;
@@ -2605,7 +2716,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }).map(doc => ({
                 doc,
                 score: scoreDoctorForAutoAssign(doc, dStr, 'erDay')
-            })).sort((a, b) => a.score - b.score);
+            }));
+            const preferredCandidates = preferDifferentDepartmentCandidates(
+                candidates.map(candidate => candidate.doc),
+                dStr,
+                'erDay'
+            );
+            const preferredIds = new Set(preferredCandidates.map(doc => doc.id));
+            candidates = candidates
+                .filter(candidate => preferredIds.has(candidate.doc.id))
+                .sort((a, b) => a.score - b.score);
 
             if (candidates.length > 0) {
                 state.shifts[dStr].erDay = candidates[0].doc.id;
@@ -2631,34 +2751,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
         targets.forEach(doc => {
             let assigned = false;
-            for (const allowSingleReplacement of [false, true]) {
+            for (const avoidSameDepartment of [true, false]) {
                 if (assigned) break;
-                for (let d = 1; d <= ld && !assigned; d++) {
-                    const dObj = new Date(y, m, d), dStr = formatDateStr(dObj);
-                    const roles = getRequiredRoles(dObj, dStr);
-                    if (!state.shifts[dStr]) state.shifts[dStr] = {};
+                for (const allowSingleReplacement of [false, true]) {
+                    if (assigned) break;
+                    for (let d = 1; d <= ld && !assigned; d++) {
+                        const dObj = new Date(y, m, d), dStr = formatDateStr(dObj);
+                        const roles = getRequiredRoles(dObj, dStr);
+                        if (!state.shifts[dStr]) state.shifts[dStr] = {};
 
-                    for (const role of roles) {
-                        if (isFixedSpecialDutyRole(dStr, role)) continue;
-                        if (role === 'erDay' && isActiveFixedErDaySaturday(dObj)) continue;
-                        const currentId = state.shifts[dStr][role];
-                        if (currentId === doc.id) { assigned = true; break; }
-                        if (!canReplaceSlotForNonResponder(currentId, allowSingleReplacement)) continue;
+                        for (const role of roles) {
+                            if (isFixedSpecialDutyRole(dStr, role)) continue;
+                            if (role === 'erDay' && isActiveFixedErDaySaturday(dObj)) continue;
+                            const currentId = state.shifts[dStr][role];
+                            if (currentId === doc.id) { assigned = true; break; }
+                            if (!canReplaceSlotForNonResponder(currentId, allowSingleReplacement)) continue;
 
-                        const original = currentId || null;
-                        if (original) delete state.shifts[dStr][role];
-                        if (getAssignedDoctorIdsForDate(dStr, role).includes(doc.id)) {
+                            const original = currentId || null;
+                            if (original) delete state.shifts[dStr][role];
+                            if (getAssignedDoctorIdsForDate(dStr, role).includes(doc.id)) {
+                                if (original) state.shifts[dStr][role] = original;
+                                continue;
+                            }
+                            if (avoidSameDepartment && hasSameDepartmentAssignmentForDate(doc, dStr, role)) {
+                                if (original) state.shifts[dStr][role] = original;
+                                continue;
+                            }
+                            const chk = checkAssignmentRule(doc.id, role, dObj);
+                            if (chk.valid) {
+                                state.shifts[dStr][role] = doc.id;
+                                assigned = true;
+                                made++;
+                                break;
+                            }
                             if (original) state.shifts[dStr][role] = original;
-                            continue;
                         }
-                        const chk = checkAssignmentRule(doc.id, role, dObj);
-                        if (chk.valid) {
-                            state.shifts[dStr][role] = doc.id;
-                            assigned = true;
-                            made++;
-                            break;
-                        }
-                        if (original) state.shifts[dStr][role] = original;
                     }
                 }
             }
@@ -2683,6 +2810,8 @@ document.addEventListener('DOMContentLoaded', () => {
 	            '・救急日中は第一希望を全体優先→第二希望→通常候補\n' +
 	            '・NG第1/第2/第3希望は禁止\n' +
 	            '・連続当直 / 同一週2回は禁止\n' +
+	            '・前月最終週と翌月第一週の休日を同じ医師が連続して担当するのは禁止\n' +
+	            '・同じ日は、可能な限り異なる科の医師を割り当てます\n' +
 	            '・月4回以上は不可（最大3回まで）\n' +
 	            '・土日祝はどの医師も月2回まで\n' +
 	            '・固定不可曜日は不可\n' +
@@ -2763,6 +2892,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (fixedFemalePreferredCandidates.length > 0) {
                     candidates = fixedFemalePreferredCandidates;
                 }
+
+                candidates = preferDifferentDepartmentCandidates(candidates, dStr, role);
 
                 if (candidates.length === 0) { skipped++; continue; }
 
