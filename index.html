@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./styles.css?v=20260906-responsive6">
     <!-- SheetJS-compatible library with style support for Excel export -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -27,7 +27,11 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
                 </button>
             </div>
-            <div class="header-actions">
+            <button id="mobile-actions-toggle" class="mobile-actions-toggle" type="button" aria-expanded="false" aria-controls="header-actions-panel">
+                <span>操作</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
+            </button>
+            <div id="header-actions-panel" class="header-actions">
                 <span id="sync-status" class="sync-status sync-local" title="この端末のブラウザ内に保存しています">ローカル保存</span>
                 <button id="sync-save-btn" class="btn-secondary" disabled>共有保存</button>
                 <button id="sync-refresh-btn" class="btn-secondary" disabled>共有読込</button>
@@ -35,13 +39,18 @@
                 <button id="today-btn" class="btn-outline">当月</button>
                 <button id="export-excel-btn" class="btn-secondary">📊 Excel出力</button>
                 <button id="save-month-btn" class="btn-secondary">💾 月保存</button>
-                <button id="auto-assign-btn" class="btn-primary" style="margin-left: 8px;">✨ 自動割り振り</button>
+                <button id="auto-assign-btn" class="btn-primary">✨ 自動割り振り</button>
             </div>
         </header>
 
         <main class="app-container">
+            <nav class="mobile-view-tabs" role="tablist" aria-label="表示切り替え">
+                <button id="mobile-calendar-tab" class="mobile-view-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="mobile-calendar-panel">当直表</button>
+                <button id="mobile-doctors-tab" class="mobile-view-tab" type="button" role="tab" aria-selected="false" aria-controls="mobile-doctors-panel" tabindex="-1">医師一覧</button>
+            </nav>
+
             <!-- Sidebar -->
-            <aside class="sidebar">
+            <aside id="mobile-doctors-panel" class="sidebar" aria-labelledby="mobile-doctors-tab">
                 <!-- Import Section -->
                 <div class="import-section">
                     <div class="import-buttons">
@@ -72,9 +81,21 @@
             </aside>
 
             <!-- Calendar -->
-            <section class="calendar-section">
+            <section id="mobile-calendar-panel" class="calendar-section" aria-labelledby="mobile-calendar-tab">
                 <div class="calendar-card">
-                    <div class="calendar-header-days">
+                    <div class="mobile-week-navigation" aria-label="表示する週の切り替え">
+                        <button id="prev-week" class="mobile-week-button" type="button" aria-label="前の週">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                        </button>
+                        <div class="mobile-week-summary">
+                            <strong id="mobile-week-range" aria-live="polite">表示週</strong>
+                            <span id="mobile-target-month">操作対象月</span>
+                        </div>
+                        <button id="next-week" class="mobile-week-button" type="button" aria-label="次の週">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        </button>
+                    </div>
+                    <div class="calendar-header-days desktop-calendar-header">
                         <div class="day-label sun">日</div>
                         <div class="day-label">月</div>
                         <div class="day-label">火</div>
@@ -83,6 +104,13 @@
                         <div class="day-label">金</div>
                         <div class="day-label sat">土</div>
                     </div>
+                    <div class="mobile-calendar-header" role="row" aria-label="当直区分">
+                        <div role="columnheader">日付</div>
+                        <div role="columnheader">病昼</div>
+                        <div role="columnheader">病夜</div>
+                        <div role="columnheader">救昼</div>
+                        <div role="columnheader">救夜</div>
+                    </div>
                     <div id="calendar-grid" class="calendar-grid"></div>
                 </div>
             </section>
@@ -90,11 +118,11 @@
     </div>
 
     <!-- Modal for Shared Save Settings -->
-    <div id="sync-settings-modal" class="modal hidden" aria-hidden="true">
+    <div id="sync-settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sync-settings-title" aria-hidden="true">
         <div class="modal-overlay" id="sync-settings-overlay"></div>
         <div class="modal-content sync-modal-content">
             <div class="modal-header">
-                <h3>共有保存の設定</h3>
+                <h3 id="sync-settings-title">共有保存の設定</h3>
                 <button class="close-btn" id="close-sync-settings" aria-label="閉じる">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
@@ -123,7 +151,7 @@
     </div>
 
     <!-- Modal for Assignment -->
-    <div id="assignment-modal" class="modal hidden" aria-hidden="true">
+    <div id="assignment-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
         <div class="modal-overlay" id="modal-overlay"></div>
         <div class="modal-content">
             <div class="modal-header">
@@ -145,7 +173,7 @@
                     </select>
                 </div>
 
-                <div id="modal-warnings" class="modal-warnings hidden"></div>
+                <div id="modal-warnings" class="modal-warnings hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 
                 <!-- 病棟日中 (休日のみ) -->
                 <div class="form-group hidden" id="fg-ward-day">
@@ -175,6 +203,6 @@
         </div>
     </div>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260906-responsive6"></script>
 </body>
 </html>

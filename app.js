@@ -8,6 +8,20 @@ document.addEventListener('DOMContentLoaded', () => {
         erDay: '🚑救急(日中)', erNight: '🚑救急(夜間)'
     };
     const ROLE_ORDER = ['wardDay', 'wardNight', 'erDay', 'erNight'];
+    const MOBILE_SURNAME_BY_COMPACT_NAME = Object.freeze({
+        '久保山知彦': '久保山',
+        '金武あゆみ': '金武',
+        '丹羽諒太郎': '丹羽',
+        '藤岡周太郎': '藤岡',
+        '藤本健太郎': '藤本',
+        '前田晃宏': '前田',
+        '大谷賢一郎': '大谷',
+        '吉田竜太郎': '吉田',
+        '山口星一郎': '山口',
+        '小澤牧人': '小澤',
+        '福嶌愛': '福嶌',
+        '蘆田建毅': '蘆田'
+    });
     const DEPARTMENT_BY_NAME = {
         '久保山知彦': 'ﾘｳﾏﾁ膠原病内科',
         '焦 圭裕': 'ﾘｳﾏﾁ膠原病内科',
@@ -550,6 +564,51 @@ document.addEventListener('DOMContentLoaded', () => {
     function formatDateStr(date) {
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     }
+    function startOfSunday(date) {
+        const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        result.setDate(result.getDate() - result.getDay());
+        return result;
+    }
+    function addCalendarDays(date, amount) {
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate() + amount);
+    }
+    function setCurrentMonthFromDate(date) {
+        state.currentDate = new Date(date.getFullYear(), date.getMonth(), 1);
+    }
+    function getDoctorNameParts(name) {
+        const normalized = normalizeName(name);
+        if (!normalized) return { surname: '', given: '' };
+        const spaced = normalized.split(' ');
+        if (spaced.length > 1) {
+            return { surname: spaced[0], given: spaced.slice(1).join('') };
+        }
+        const compact = normalizeDoctorMatchName(normalized);
+        const surname = MOBILE_SURNAME_BY_COMPACT_NAME[compact];
+        if (!surname) return { surname: normalized, given: '' };
+        return { surname, given: compact.slice(surname.length) };
+    }
+    function getMobileDoctorDisplayName(name, dateObj) {
+        const normalized = normalizeName(name);
+        if (!normalized || isExternalFixedDutyName(normalized)) return normalized;
+        const parts = getDoctorNameParts(normalized);
+        if (!parts.given) return parts.surname;
+        const duplicateCount = state.doctors
+            .filter(doc => isDoctorActiveOnDate(doc, dateObj))
+            .map(doc => getDoctorNameParts(doc.name).surname)
+            .filter(surname => surname === parts.surname)
+            .length;
+        return duplicateCount > 1 ? `${parts.surname}${parts.given.charAt(0)}` : parts.surname;
+    }
+    function formatMobileWeekRange(startDate) {
+        const endDate = addCalendarDays(startDate, 6);
+        if (startDate.getFullYear() !== endDate.getFullYear()) {
+            return `${startDate.getFullYear()}年${startDate.getMonth() + 1}月${startDate.getDate()}日〜${endDate.getFullYear()}年${endDate.getMonth() + 1}月${endDate.getDate()}日`;
+        }
+        if (startDate.getMonth() !== endDate.getMonth()) {
+            return `${startDate.getFullYear()}年${startDate.getMonth() + 1}月${startDate.getDate()}日〜${endDate.getMonth() + 1}月${endDate.getDate()}日`;
+        }
+        return `${startDate.getFullYear()}年${startDate.getMonth() + 1}月${startDate.getDate()}日〜${endDate.getDate()}日`;
+    }
     function getMonthKey(date) {
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     }
@@ -847,6 +906,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingNgDates = [];
     let editingDateStr = null;
     let editingDateObj = null;
+    let assignmentReturnFocus = null;
+    let syncSettingsReturnFocus = null;
 
     const STORAGE_KEYS = {
         doctors: 'doctors',
@@ -912,6 +973,14 @@ document.addEventListener('DOMContentLoaded', () => {
         formResponsesByMonth: localSnapshot.formResponsesByMonth
     };
 
+    const mobileMedia = window.matchMedia('(max-width: 767px)');
+    const viewState = {
+        mobileWeekStart: null,
+        mobileActiveDate: new Date(),
+        mobileMedia,
+        activeMobilePanel: 'calendar'
+    };
+
     function ensureRequiredExtraDoctors() {
         let changed = false;
         REQUIRED_EXTRA_DOCTOR_NAMES.forEach(name => {
@@ -939,9 +1008,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== DOM References =====
 	    const els = {
+	        appHeader: document.querySelector('.app-header'),
+	        headerActions: document.querySelector('.header-actions'),
+	        appContainer: document.querySelector('.app-container'),
+	        sidebar: document.querySelector('.sidebar'),
+	        calendarSection: document.querySelector('.calendar-section'),
 	        currentMonthDisplay: document.getElementById('current-month-display'),
 	        prevMonthBtn: document.getElementById('prev-month'),
 	        nextMonthBtn: document.getElementById('next-month'),
+            mobileActionsToggle: document.getElementById('mobile-actions-toggle'),
+            mobileCalendarTab: document.getElementById('mobile-calendar-tab'),
+            mobileDoctorsTab: document.getElementById('mobile-doctors-tab'),
+            prevWeekBtn: document.getElementById('prev-week'),
+            nextWeekBtn: document.getElementById('next-week'),
+            mobileWeekRange: document.getElementById('mobile-week-range'),
+            mobileTargetMonth: document.getElementById('mobile-target-month'),
             syncStatus: document.getElementById('sync-status'),
             syncSaveBtn: document.getElementById('sync-save-btn'),
             syncRefreshBtn: document.getElementById('sync-refresh-btn'),
@@ -1284,14 +1365,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openSyncSettings() {
+        syncSettingsReturnFocus = viewState.mobileMedia.matches && els.mobileActionsToggle
+            ? els.mobileActionsToggle
+            : document.activeElement;
         els.syncEndpointUrl.value = syncState.config.endpoint || '';
         els.syncAppKey.value = syncState.config.appKey || '';
         els.syncUserName.value = syncState.config.userName || '';
         els.syncSettingsModal.classList.remove('hidden');
+        els.syncSettingsModal.setAttribute('aria-hidden', 'false');
+        window.requestAnimationFrame(() => els.closeSyncSettingsBtn.focus());
     }
 
     function closeSyncSettings() {
         els.syncSettingsModal.classList.add('hidden');
+        els.syncSettingsModal.setAttribute('aria-hidden', 'true');
+        if (syncSettingsReturnFocus && syncSettingsReturnFocus.isConnected) syncSettingsReturnFocus.focus();
+        syncSettingsReturnFocus = null;
     }
 
     function saveSyncSettings() {
@@ -1409,6 +1498,45 @@ document.addEventListener('DOMContentLoaded', () => {
 	        const savedMonth = state.savedMonths[getMonthKeyFromDateStr(dateStr)];
 	        return (savedMonth && savedMonth.shifts && savedMonth.shifts[dateStr]) || {};
 	    }
+
+    function hasMonthEntries(source, monthKey) {
+        return Object.keys(source || {}).some(key => key.startsWith(monthKey));
+    }
+
+    function withMobileMonthContext(dateObj, callback) {
+        const monthKey = getMonthKey(dateObj);
+        const savedMonth = state.savedMonths[monthKey];
+        const previousDate = state.currentDate;
+        const previousShifts = state.shifts;
+        const previousSpecialDayRules = state.specialDayRules;
+        const hasWorkingMonth = hasMonthEntries(state.shifts, monthKey) ||
+            hasMonthEntries(state.specialDayRules, monthKey);
+
+        if (savedMonth && !hasWorkingMonth) {
+            state.shifts = { ...state.shifts, ...cloneData(savedMonth.shifts) };
+            state.specialDayRules = { ...state.specialDayRules, ...cloneData(savedMonth.specialDayRules) };
+        }
+        setCurrentMonthFromDate(dateObj);
+        try {
+            return callback();
+        } finally {
+            state.currentDate = previousDate;
+            state.shifts = previousShifts;
+            state.specialDayRules = previousSpecialDayRules;
+        }
+    }
+
+    function ensureEditableMonthLoaded(dateObj) {
+        const monthKey = getMonthKey(dateObj);
+        const savedMonth = state.savedMonths[monthKey];
+        if (!savedMonth) return;
+        const hasWorkingMonth = hasMonthEntries(state.shifts, monthKey) ||
+            hasMonthEntries(state.specialDayRules, monthKey);
+        if (hasWorkingMonth) return;
+
+        Object.assign(state.shifts, cloneData(savedMonth.shifts));
+        Object.assign(state.specialDayRules, cloneData(savedMonth.specialDayRules));
+    }
 
     function countShiftEntriesForDoctor(shifts, doctorId, specialRules) {
         const stats = { total: 0, holiday: 0 };
@@ -2226,7 +2354,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="doctor-meta">外来: ${opStr}${ngStr}${fixedNgStr}${erDayFlag}${noteFlag}</span>
                     <span class="doctor-count">今月: ${count}回</span>
                 </div>
-                <button class="remove-doctor-btn" data-id="${doc.id}">
+                <button class="remove-doctor-btn" data-id="${doc.id}" aria-label="${doc.name}を削除" title="${doc.name}を削除">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>`;
             els.doctorList.appendChild(li);
@@ -2237,7 +2365,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ===== Rendering: Calendar =====
-	    function renderCalendar() {
+    function renderPeriodHeader() {
 	        const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth();
 	        const monthKey = getMonthKey(state.currentDate);
             const savedBadge = state.savedMonths[monthKey] ? ' <span class="saved-month-badge">保存済</span>' : '';
@@ -2245,6 +2373,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? ' <span class="form-month-badge">フォーム済</span>'
                 : '';
 	        els.currentMonthDisplay.innerHTML = `${y}年 ${m + 1}月${savedBadge}${formBadge}`;
+            if (els.mobileTargetMonth) {
+                els.mobileTargetMonth.textContent = `操作対象: ${y}年${m + 1}月`;
+            }
+    }
+
+    function makeDateInteractive(element, dObj, dStr, onOpen) {
+        const fullDate = `${dObj.getFullYear()}年${dObj.getMonth() + 1}月${dObj.getDate()}日（${DAY_NAMES[dObj.getDay()]}）`;
+        element.dataset.date = dStr;
+        element.setAttribute('role', 'button');
+        element.setAttribute('tabindex', '0');
+        if (!element.hasAttribute('aria-label')) {
+            element.setAttribute('aria-label', `${fullDate}の当直を編集`);
+        }
+        element.addEventListener('click', onOpen);
+        element.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            onOpen();
+        });
+    }
+
+	    function renderDesktopMonth() {
+	        const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth();
+            renderPeriodHeader();
         els.calendarGrid.innerHTML = '';
         const fd = new Date(y, m, 1), ld = new Date(y, m + 1, 0);
         const td = new Date();
@@ -2333,16 +2485,290 @@ document.addEventListener('DOMContentLoaded', () => {
                 cont.appendChild(badge);
             });
             dayDiv.appendChild(cont);
-            dayDiv.addEventListener('click', () => openModal(dObj, dStr));
+            makeDateInteractive(dayDiv, dObj, dStr, () => openModal(dObj, dStr));
             els.calendarGrid.appendChild(dayDiv);
         }
         renderDoctors();
     }
 
-    // ===== Month Navigation =====
-	    els.prevMonthBtn.addEventListener('click', () => { state.currentDate.setMonth(state.currentDate.getMonth() - 1); renderCalendar(); });
-	    els.nextMonthBtn.addEventListener('click', () => { state.currentDate.setMonth(state.currentDate.getMonth() + 1); renderCalendar(); });
-	    els.todayBtn.addEventListener('click', () => { state.currentDate = new Date(); renderCalendar(); });
+    function createMobileRoleCell(dObj, dStr, role, requiredRoles, dayShifts, isHol) {
+        const cell = document.createElement('div');
+        cell.className = `shift-badge mobile-role-cell ${role}`;
+        const fullRoleLabel = getRoleLabelForDayType(role, dObj, isHol);
+
+        if (!requiredRoles.includes(role)) {
+            cell.classList.add('not-required');
+            cell.textContent = '－';
+            cell.title = `${fullRoleLabel}: 対象外`;
+            return cell;
+        }
+
+        if (isFixedSpecialDutyRole(dStr, role)) {
+            const fullNames = getFixedDutyDisplayNames(dStr, role);
+            const shortNames = fullNames.map(name => getMobileDoctorDisplayName(name, dObj));
+            cell.classList.add('fixed-duty');
+            cell.textContent = shortNames.join('・');
+            cell.title = `${fullRoleLabel}: 固定 ${fullNames.join('・')}`;
+            return cell;
+        }
+
+        if (role === 'erDay' && isActiveFixedErDaySaturday(dObj)) {
+            cell.classList.add('fixed-duty');
+            cell.textContent = '救急医';
+            cell.title = `${fullRoleLabel}: 救急医固定`;
+            return cell;
+        }
+
+        const doctorId = dayShifts[role];
+        if (!doctorId) {
+            cell.classList.add('empty');
+            cell.textContent = '未';
+            cell.title = `${fullRoleLabel}: 未割当`;
+            return cell;
+        }
+
+        const doctorName = findDoctorName(doctorId);
+        if (!doctorName) {
+            cell.classList.add('empty');
+            cell.textContent = '不明';
+            cell.title = `${fullRoleLabel}: 医師が見つかりません`;
+            return cell;
+        }
+
+        cell.textContent = getMobileDoctorDisplayName(doctorName, dObj);
+        cell.title = `${fullRoleLabel}: ${doctorName}`;
+        const rule = withMobileMonthContext(dObj, () => checkAssignmentRule(doctorId, role, dObj));
+        if (!rule.valid) {
+            cell.classList.add('warning');
+            cell.title += ` / ${rule.error}`;
+        } else if (rule.warning) {
+            cell.classList.add('soft-warning');
+            if (hasNoteWarning(rule.warning)) cell.classList.add('note-warning');
+            cell.title += ` / ${rule.warning}`;
+        }
+        return cell;
+    }
+
+    function openMobileDate(dObj, dStr) {
+        ensureEditableMonthLoaded(dObj);
+        viewState.mobileActiveDate = new Date(dObj.getFullYear(), dObj.getMonth(), dObj.getDate());
+        setCurrentMonthFromDate(dObj);
+        renderMobileWeek();
+        const refreshedRow = els.calendarGrid.querySelector(`[data-date="${dStr}"]`);
+        if (refreshedRow) refreshedRow.focus();
+        openModal(dObj, dStr);
+    }
+
+    function renderMobileWeek() {
+        if (!viewState.mobileWeekStart) {
+            viewState.mobileActiveDate = new Date(state.currentDate);
+            viewState.mobileWeekStart = startOfSunday(viewState.mobileActiveDate);
+        }
+
+        renderPeriodHeader();
+        els.calendarGrid.innerHTML = '';
+        if (els.mobileWeekRange) {
+            els.mobileWeekRange.textContent = formatMobileWeekRange(viewState.mobileWeekStart);
+        }
+
+        const todayStr = formatDateStr(new Date());
+        const targetMonthKey = getCurrentMonthKey();
+        for (let offset = 0; offset < 7; offset++) {
+            const dObj = addCalendarDays(viewState.mobileWeekStart, offset);
+            const dStr = formatDateStr(dObj);
+            const renderData = withMobileMonthContext(dObj, () => ({
+                requiredRoles: getRequiredRoles(dObj, dStr),
+                dayShifts: state.shifts[dStr] || {},
+                isHol: isHoliday(dObj, dStr),
+                specialDayRule: state.specialDayRules[dStr] || '',
+                exceptionIssues: getDayExceptionIssues(dObj, dStr)
+            }));
+            const row = document.createElement('div');
+            row.className = 'calendar-day mobile-week-row';
+            if (dObj.getDay() === 0) row.classList.add('sun');
+            if (dObj.getDay() === 6) row.classList.add('sat');
+            if (state.holidays[dStr] || renderData.specialDayRule === 'holiday') row.classList.add('hol');
+            if (dStr === todayStr) row.classList.add('today');
+            if (getMonthKey(dObj) !== targetMonthKey) row.classList.add('outside-target-month');
+            if (isFixedSpecialDutyDate(dStr)) row.classList.add('has-fixed-duty');
+            const exceptionIssues = renderData.exceptionIssues;
+            if (exceptionIssues.length > 0) {
+                row.classList.add('has-exception');
+                row.title = exceptionIssues.join(' / ');
+            }
+
+            const dateCell = document.createElement('div');
+            dateCell.className = 'mobile-date-cell';
+            const dateMain = document.createElement('span');
+            dateMain.className = 'mobile-date-main';
+            dateMain.textContent = `${dObj.getMonth() + 1}/${dObj.getDate()}`;
+            const dateDay = document.createElement('span');
+            dateDay.className = 'mobile-date-day';
+            dateDay.textContent = DAY_NAMES[dObj.getDay()];
+            dateCell.append(dateMain, dateDay);
+            if (state.holidays[dStr]) {
+                const holidayMark = document.createElement('span');
+                holidayMark.className = 'mobile-holiday-mark';
+                holidayMark.textContent = '祝';
+                holidayMark.title = state.holidays[dStr];
+                dateCell.appendChild(holidayMark);
+            }
+            row.appendChild(dateCell);
+
+            ROLE_ORDER.forEach(role => {
+                row.appendChild(createMobileRoleCell(
+                    dObj,
+                    dStr,
+                    role,
+                    renderData.requiredRoles,
+                    renderData.dayShifts,
+                    renderData.isHol
+                ));
+            });
+
+            const roleSummary = ROLE_ORDER.map(role => {
+                const cell = row.querySelector(`.mobile-role-cell.${role}`);
+                return cell && cell.title
+                    ? cell.title
+                    : `${getRoleLabelForDayType(role, dObj, renderData.isHol)}: 対象外`;
+            }).join('、');
+            row.setAttribute('aria-label', `${dObj.getFullYear()}年${dObj.getMonth() + 1}月${dObj.getDate()}日（${DAY_NAMES[dObj.getDay()]}）、${roleSummary}。当直を編集`);
+            makeDateInteractive(row, dObj, dStr, () => openMobileDate(dObj, dStr));
+            els.calendarGrid.appendChild(row);
+        }
+        renderDoctors();
+    }
+
+    function renderCalendar() {
+        if (viewState.mobileMedia.matches) renderMobileWeek();
+        else renderDesktopMonth();
+    }
+
+    function moveMobileWeek(amount) {
+        if (!viewState.mobileWeekStart) viewState.mobileWeekStart = startOfSunday(state.currentDate);
+        viewState.mobileWeekStart = addCalendarDays(viewState.mobileWeekStart, amount * 7);
+        viewState.mobileActiveDate = addCalendarDays(viewState.mobileWeekStart, 3);
+        setCurrentMonthFromDate(viewState.mobileActiveDate);
+        renderCalendar();
+    }
+
+    // ===== Month / Week Navigation =====
+	    els.prevMonthBtn.addEventListener('click', () => {
+            if (viewState.mobileMedia.matches) {
+                const target = new Date(state.currentDate.getFullYear(), state.currentDate.getMonth() - 1, 1);
+                state.currentDate = target;
+                viewState.mobileActiveDate = new Date(target);
+                viewState.mobileWeekStart = startOfSunday(target);
+            } else {
+                state.currentDate = new Date(state.currentDate.getFullYear(), state.currentDate.getMonth() - 1, 1);
+            }
+            renderCalendar();
+        });
+	    els.nextMonthBtn.addEventListener('click', () => {
+            if (viewState.mobileMedia.matches) {
+                const target = new Date(state.currentDate.getFullYear(), state.currentDate.getMonth() + 1, 1);
+                state.currentDate = target;
+                viewState.mobileActiveDate = new Date(target);
+                viewState.mobileWeekStart = startOfSunday(target);
+            } else {
+                state.currentDate = new Date(state.currentDate.getFullYear(), state.currentDate.getMonth() + 1, 1);
+            }
+            renderCalendar();
+        });
+	    els.todayBtn.addEventListener('click', () => {
+            state.currentDate = new Date();
+            viewState.mobileActiveDate = new Date();
+            viewState.mobileWeekStart = startOfSunday(viewState.mobileActiveDate);
+            renderCalendar();
+        });
+        if (els.prevWeekBtn) els.prevWeekBtn.addEventListener('click', () => moveMobileWeek(-1));
+        if (els.nextWeekBtn) els.nextWeekBtn.addEventListener('click', () => moveMobileWeek(1));
+
+        function setMobilePanel(panel) {
+            const nextPanel = panel === 'doctors' ? 'doctors' : 'calendar';
+            viewState.activeMobilePanel = nextPanel;
+            if (els.appContainer) {
+                els.appContainer.dataset.mobileView = nextPanel;
+                els.appContainer.classList.toggle('mobile-doctors-active', nextPanel === 'doctors');
+            }
+            if (els.mobileCalendarTab) {
+                els.mobileCalendarTab.setAttribute('aria-selected', String(nextPanel === 'calendar'));
+                els.mobileCalendarTab.setAttribute('tabindex', nextPanel === 'calendar' ? '0' : '-1');
+                els.mobileCalendarTab.classList.toggle('is-active', nextPanel === 'calendar');
+            }
+            if (els.mobileDoctorsTab) {
+                els.mobileDoctorsTab.setAttribute('aria-selected', String(nextPanel === 'doctors'));
+                els.mobileDoctorsTab.setAttribute('tabindex', nextPanel === 'doctors' ? '0' : '-1');
+                els.mobileDoctorsTab.classList.toggle('is-active', nextPanel === 'doctors');
+            }
+        }
+
+        function setMobileActionsOpen(isOpen) {
+            if (!els.mobileActionsToggle || !els.appHeader) return;
+            els.mobileActionsToggle.setAttribute('aria-expanded', String(isOpen));
+            els.appHeader.classList.toggle('mobile-actions-open', isOpen);
+        }
+
+        if (els.mobileCalendarTab) {
+            els.mobileCalendarTab.addEventListener('click', () => setMobilePanel('calendar'));
+        }
+        if (els.mobileDoctorsTab) {
+            els.mobileDoctorsTab.addEventListener('click', () => setMobilePanel('doctors'));
+        }
+        [els.mobileCalendarTab, els.mobileDoctorsTab].filter(Boolean).forEach(tab => {
+            tab.addEventListener('keydown', event => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                const nextPanel = viewState.activeMobilePanel === 'calendar' ? 'doctors' : 'calendar';
+                setMobilePanel(nextPanel);
+                (nextPanel === 'calendar' ? els.mobileCalendarTab : els.mobileDoctorsTab).focus();
+            });
+        });
+        if (els.mobileActionsToggle) {
+            els.mobileActionsToggle.addEventListener('click', () => {
+                setMobileActionsOpen(els.mobileActionsToggle.getAttribute('aria-expanded') !== 'true');
+            });
+        }
+        if (els.headerActions) {
+            els.headerActions.addEventListener('click', event => {
+                if (viewState.mobileMedia.matches && event.target.closest('button, label')) {
+                    setMobileActionsOpen(false);
+                }
+            });
+        }
+        document.addEventListener('click', event => {
+            if (!viewState.mobileMedia.matches || !els.appHeader || els.appHeader.contains(event.target)) return;
+            setMobileActionsOpen(false);
+        });
+
+        let lastMobileMode = viewState.mobileMedia.matches;
+        const handleMobileMediaChange = event => {
+            const nextMobileMode = Boolean(event.matches);
+            if (nextMobileMode === lastMobileMode) return;
+            lastMobileMode = nextMobileMode;
+            if (nextMobileMode) {
+                viewState.mobileActiveDate = new Date(state.currentDate);
+                viewState.mobileWeekStart = startOfSunday(viewState.mobileActiveDate);
+            } else {
+                setCurrentMonthFromDate(viewState.mobileActiveDate || state.currentDate);
+                setMobileActionsOpen(false);
+            }
+            renderCalendar();
+        };
+        if (viewState.mobileMedia.addEventListener) {
+            viewState.mobileMedia.addEventListener('change', handleMobileMediaChange);
+        } else {
+            viewState.mobileMedia.addListener(handleMobileMediaChange);
+        }
+        let mobileResizeFrame = null;
+        window.addEventListener('resize', () => {
+            if (mobileResizeFrame) window.cancelAnimationFrame(mobileResizeFrame);
+            mobileResizeFrame = window.requestAnimationFrame(() => {
+                mobileResizeFrame = null;
+                handleMobileMediaChange({ matches: viewState.mobileMedia.matches });
+            });
+        });
+        setMobilePanel('calendar');
 
 	    function cloneData(value) {
 	        return JSON.parse(JSON.stringify(value || {}));
@@ -2499,6 +2925,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openModal(dObj, dStr) {
+        assignmentReturnFocus = document.activeElement;
         editingDateStr = dStr; editingDateObj = dObj;
         els.modalDateDisplay.textContent = `${dObj.getFullYear()}/${dObj.getMonth() + 1}/${dObj.getDate()} (${DAY_NAMES[dObj.getDay()]})`;
         if (isFixedSpecialDutyDate(dStr)) {
@@ -2515,6 +2942,8 @@ document.addEventListener('DOMContentLoaded', () => {
         roles.forEach(r => { if (els.selects[r]) els.selects[r].value = dS[r] || ''; });
         updateModalState();
         els.modal.classList.remove('hidden');
+        els.modal.setAttribute('aria-hidden', 'false');
+        window.requestAnimationFrame(() => els.closeModalBtn.focus());
     }
 
     function collectModalIssues() {
@@ -2593,7 +3022,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function closeModal() { els.modal.classList.add('hidden'); }
+    function closeModal(options = {}) {
+        const restoreFocus = options.restoreFocus !== false;
+        els.modal.classList.add('hidden');
+        els.modal.setAttribute('aria-hidden', 'true');
+        if (restoreFocus && assignmentReturnFocus && assignmentReturnFocus.isConnected) assignmentReturnFocus.focus();
+        assignmentReturnFocus = null;
+    }
 
     function saveAssignment() {
         const issues = collectModalIssues();
@@ -2637,7 +3072,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!group.classList.contains('hidden') && !els.selects[r].classList.contains('hidden') && els.selects[r].value) state.shifts[editingDateStr][r] = els.selects[r].value;
         });
         if (Object.keys(state.shifts[editingDateStr]).length === 0) delete state.shifts[editingDateStr];
-        saveData('割り付け保存'); closeModal(); renderCalendar();
+        const savedDateStr = editingDateStr;
+        saveData('割り付け保存');
+        closeModal({ restoreFocus: false });
+        renderCalendar();
+        const refreshedDate = els.calendarGrid.querySelector(`[data-date="${savedDateStr}"]`);
+        if (refreshedDate) refreshedDate.focus();
     }
 
     Object.values(els.selects).forEach(sc => sc.addEventListener('change', updateModalState));
@@ -2646,6 +3086,36 @@ document.addEventListener('DOMContentLoaded', () => {
     els.cancelAssignmentBtn.addEventListener('click', closeModal);
     els.saveAssignmentBtn.addEventListener('click', saveAssignment);
     els.modalOverlay.addEventListener('click', closeModal);
+
+    document.addEventListener('keydown', event => {
+        const assignmentOpen = !els.modal.classList.contains('hidden');
+        const syncSettingsOpen = !els.syncSettingsModal.classList.contains('hidden');
+        if (event.key === 'Escape') {
+            if (assignmentOpen) closeModal();
+            else if (syncSettingsOpen) closeSyncSettings();
+            else {
+                const actionsWereOpen = els.mobileActionsToggle && els.mobileActionsToggle.getAttribute('aria-expanded') === 'true';
+                setMobileActionsOpen(false);
+                if (actionsWereOpen) els.mobileActionsToggle.focus();
+            }
+            return;
+        }
+        if (event.key !== 'Tab' || (!assignmentOpen && !syncSettingsOpen)) return;
+        const activeModal = assignmentOpen ? els.modal : els.syncSettingsModal;
+        const focusable = Array.from(activeModal.querySelectorAll(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )).filter(element => !element.classList.contains('hidden'));
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
 
     // ===== Auto Assign =====
     function scoreDoctorForAutoAssign(doc, dateStr, role) {
