@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '岩根 成豪': '循環器内科',
         '岩田 幸代': '循環器内科',
         '松本 大典': '循環器内科',
+        '蘆田建毅': '循環器内科',
         '竹重 遼': '循環器内科',
         '三木 秀晃': '消化器内科',
         '北村 泰明': '消化器内科',
@@ -99,6 +100,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const MANUAL_ONLY_DOCTOR_NAMES = new Set([
         '松岡 里紗'
     ]);
+    const ER_NIGHT_ONLY_DOCTOR_NAMES = new Set([
+        '福嶌愛',
+        '前田晃宏'
+    ]);
+    const THURSDAY_WARD_NIGHT_ONLY_DOCTOR_NAMES = new Set([
+        '蘆田建毅'
+    ]);
     const SATURDAY_ER_DAY_EXTRA_DOCTOR_NAMES = new Set([
         '久保山知彦'
     ]);
@@ -121,7 +129,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const REQUIRED_EXTRA_DOCTOR_NAMES = new Set([
         '小澤牧人',
-        '松岡 里紗'
+        '松岡 里紗',
+        '福嶌愛',
+        '前田晃宏',
+        '蘆田建毅'
     ]);
     const FIXED_WEEKDAY_NG_BY_NAME = {
         '黒川 晟': new Set([0, 1]), // 日・月（水曜外来は残すため火曜夜間は不可）
@@ -137,13 +148,13 @@ document.addEventListener('DOMContentLoaded', () => {
         '2026-09-23': { erDay: ['救急医'], erNight: ['堀川 真衣'], wardDay: ['吉井 直子', '大谷賢一郎'], wardNight: ['春山 忠佑'] },
         '2026-12-29': { erDay: ['今中 友香'], wardDay: ['吉井 直子', '大谷賢一郎'], wardNight: ['吉田竜太郎'] },
         '2026-12-30': { erDay: ['梁間 敢'], wardDay: ['西島 正剛', '田中 康史'], wardNight: ['近藤 和也'] },
-        '2026-12-31': { erDay: ['三木 秀晃'], wardDay: ['佐々木 諭', '松本 大典'], wardNight: ['黒川 晟'] },
+        '2026-12-31': { erDay: ['三木 秀晃'], wardDay: ['佐々木 諭'], wardNight: ['黒川 晟'] },
         '2027-01-01': { erDay: ['古田 寛人'], wardDay: ['藤田 光一', '山口星一郎'], wardNight: ['上野 峻輔'] },
         '2027-01-02': { erDay: ['焦 圭裕'], wardDay: ['金 容壱', '水本 綾'], wardNight: ['竹重 遼'] },
         '2027-01-03': { erDay: ['救急医'], wardDay: ['岩根 成豪', '北村 泰明'], wardNight: ['丹羽諒太郎'] }
     };
 
-    // テンプレートv2「01_医師マスタ」時間外対応=〇 の56名 + 新規/臨時2名
+    // 現行マスタ。入退職後も過去の割り付けを表示できるよう、在籍期間付きで保持する。
     const DEFAULT_DOCTORS = [
         { name: '久保山知彦', group: '医長', holidayErDayPreferred: false, outpatientDays: ['火', '水'] },
         { name: '焦 圭裕', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['火', '金'] },
@@ -156,7 +167,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: '富垣 成', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: ['水', '木'] },
         { name: '梁間 敢', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['火', '水'] },
         { name: '藤岡周太郎', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['水', '金'] },
-        { name: '藤本健太郎', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
+        { name: '藤本健太郎', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [], availableUntil: '2026-09-30' },
+        { name: '前田晃宏', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [], availableFrom: '2026-10-01' },
         { name: '上野 峻輔', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['火', '水'] },
         { name: '中村 基寛', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: ['金'] },
         { name: '古田 寛人', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['月', '金'] },
@@ -171,7 +183,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: '佐々木 諭', group: '副部長', holidayErDayPreferred: false, outpatientDays: ['月', '水'] },
         { name: '岩根 成豪', group: '医長', holidayErDayPreferred: false, outpatientDays: ['水'] },
         { name: '岩田 幸代', group: '部長', holidayErDayPreferred: false, outpatientDays: ['月', '木'] },
-        { name: '松本 大典', group: '部長', holidayErDayPreferred: false, outpatientDays: ['月', '火'] },
+        { name: '松本 大典', group: '部長', holidayErDayPreferred: false, outpatientDays: ['月', '火'], availableUntil: '2026-10-31' },
+        { name: '蘆田建毅', group: '部長', holidayErDayPreferred: false, outpatientDays: [], availableFrom: '2026-10-01' },
         { name: '竹重 遼', group: '副部長', holidayErDayPreferred: false, outpatientDays: ['火', '金'] },
         { name: '三木 秀晃', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['月', '木'] },
         { name: '北村 泰明', group: '部長', holidayErDayPreferred: true, outpatientDays: ['水', '金'] },
@@ -199,7 +212,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: '椿 遥花', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
         { name: '渡邊 有史', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['木'] },
         { name: '箱谷 聡', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
-        { name: '西岡 唯', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
+        { name: '西岡 唯', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [], availableUntil: '2026-09-30' },
+        { name: '福嶌愛', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [], availableFrom: '2026-10-01' },
         { name: '重岡 靖', group: '部長', holidayErDayPreferred: false, outpatientDays: ['月', '水', '木', '金'] },
         { name: '小澤牧人', group: '医長', holidayErDayPreferred: false, outpatientDays: [] },
         { name: '松岡 里紗', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
@@ -213,6 +227,8 @@ document.addEventListener('DOMContentLoaded', () => {
             department: DEPARTMENT_BY_NAME[normalizeName(d.name)] || '',
             outpatientDays: d.outpatientDays || [],
             holidayErDayPreferred: d.holidayErDayPreferred,
+            availableFrom: d.availableFrom || '',
+            availableUntil: d.availableUntil || '',
             ngDates1: [], ngDates2: [], ngDates3: [],
             notes: '', preferredDates1: [], preferredDates2: [], preferredDates: []
         };
@@ -397,8 +413,32 @@ document.addEventListener('DOMContentLoaded', () => {
     function isManualOnlyDoctor(doc) {
         return MANUAL_ONLY_DOCTOR_NAMES.has(normalizeName(doc.name));
     }
-    function isAutoAssignableDoctor(doc) {
-        return !isDutyExcludedDoctor(doc) && !isManualOnlyDoctor(doc);
+    function isErNightOnlyDoctor(doc) {
+        return ER_NIGHT_ONLY_DOCTOR_NAMES.has(normalizeName(doc.name));
+    }
+    function isThursdayWardNightOnlyDoctor(doc) {
+        return THURSDAY_WARD_NIGHT_ONLY_DOCTOR_NAMES.has(normalizeName(doc.name));
+    }
+    function isDoctorActiveOnDate(doc, dateObj) {
+        if (!doc || !dateObj) return false;
+        const dateStr = formatDateStr(dateObj);
+        if (doc.availableFrom && dateStr < doc.availableFrom) return false;
+        if (doc.availableUntil && dateStr > doc.availableUntil) return false;
+        return true;
+    }
+    function isDoctorActiveInMonth(doc, monthDate = state.currentDate) {
+        if (!doc || !monthDate) return false;
+        const y = monthDate.getFullYear();
+        const m = monthDate.getMonth();
+        const monthStart = formatDateStr(new Date(y, m, 1));
+        const monthEnd = formatDateStr(new Date(y, m + 1, 0));
+        return (!doc.availableFrom || doc.availableFrom <= monthEnd) &&
+            (!doc.availableUntil || doc.availableUntil >= monthStart);
+    }
+    function isAutoAssignableDoctor(doc, dateObj = state.currentDate) {
+        return isDoctorActiveOnDate(doc, dateObj) &&
+            !isDutyExcludedDoctor(doc) &&
+            !isManualOnlyDoctor(doc);
     }
     function isYoshidaYaeDoctor(doc) {
         return normalizeName(doc.name) === '吉田 也恵';
@@ -462,6 +502,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return !isFemaleDoctor(doc) || isFemaleSundayWardDaySlot(doc, dateObj, role);
     }
     function canWeekdayWardNightChief(doc, dateObj, dateStr) {
+        if (isThursdayWardNightOnlyDoctor(doc)) {
+            return doc.group === '部長' &&
+                !doc.holidayErDayPreferred &&
+                dateObj &&
+                dateObj.getDay() === 4;
+        }
         return doc.group === '部長' &&
             WEEKDAY_WARD_NIGHT_CHIEF_NAMES.has(normalizeName(doc.name)) &&
             !doc.holidayErDayPreferred &&
@@ -472,7 +518,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return (doc.group === '副部長' || doc.group === '部長' || doc.group === '副部長以上') && !isCardiologyDoctor(doc);
     }
     function canDoWardDayDoctor(doc) {
-        return !isIwataYukiyoDoctor(doc) && !isFridayWardOnlyDoctor(doc) && isSeniorGroup(doc.group) && !isPriorityErNightDoctor(doc);
+        return !isErNightOnlyDoctor(doc) &&
+            !isThursdayWardNightOnlyDoctor(doc) &&
+            !isIwataYukiyoDoctor(doc) &&
+            !isFridayWardOnlyDoctor(doc) &&
+            isSeniorGroup(doc.group) &&
+            !isPriorityErNightDoctor(doc);
     }
     function canDoWardNightPrimaryDoctor(doc, dateObj, dateStr) {
         if (isIwataPreferredRole(doc, 'wardNight', dateObj, dateStr)) return true;
@@ -483,11 +534,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return doc.group === '6-7年目' && !isPriorityErNightDoctor(doc);
     }
     function canDoWardNightDoctor(doc, dateObj, dateStr) {
+        if (isErNightOnlyDoctor(doc)) return false;
+        if (isThursdayWardNightOnlyDoctor(doc)) {
+            return !!(dateObj && dateObj.getDay() === 4 && canDoWardNightPrimaryDoctor(doc, dateObj, dateStr));
+        }
         if (isFridayWardOnlyDoctor(doc)) return !!(dateObj && dateObj.getDay() === 5);
         return canDoWardNightPrimaryDoctor(doc, dateObj, dateStr) || canDoWardNightBackupDoctor(doc);
     }
     function canDoErNightDoctor(doc) {
-        return !isFridayWardOnlyDoctor(doc) && (isJunior(doc.group) || isPriorityErNightDoctor(doc));
+        if (isThursdayWardNightOnlyDoctor(doc)) return false;
+        return !isFridayWardOnlyDoctor(doc) &&
+            (isErNightOnlyDoctor(doc) || isJunior(doc.group) || isPriorityErNightDoctor(doc));
     }
 
     function formatDateStr(date) {
@@ -672,6 +729,8 @@ document.addEventListener('DOMContentLoaded', () => {
             department: doc.department || getDepartmentByName(doc.name),
             outpatientDays,
             holidayErDayPreferred,
+            availableFrom: defaultDoctor ? (defaultDoctor.availableFrom || '') : (doc.availableFrom || ''),
+            availableUntil: defaultDoctor ? (defaultDoctor.availableUntil || '') : (doc.availableUntil || ''),
             ngDates1: doc.ngDates1 || doc.hardNgDates || [],
             ngDates2: doc.ngDates2 || doc.softNgDates || [],
             ngDates3: doc.ngDates3 || [],
@@ -1421,6 +1480,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function isFormNonResponder(doc) {
         if (!hasFormResponseStatus()) return false;
+        if (!isDoctorActiveInMonth(doc)) return false;
         if (isDutyExcludedDoctor(doc) || isManualOnlyDoctor(doc)) return false;
         return !getCurrentResponderSet().has(normalizeDoctorMatchName(doc.name));
     }
@@ -1714,6 +1774,9 @@ document.addEventListener('DOMContentLoaded', () => {
             '小澤牧人先生は金曜病棟当直のみ可能です',
             '小澤牧人先生は月1回までです',
             '岩田先生は平日・土日祝の病棟当直のみ可能です',
+            '在籍期間外です',
+            '救急夜間のみ担当可能です',
+            '木曜日の病棟夜間のみ担当可能です',
             '固定不可曜日',
             '翌日が外来です',
             '不可日(第1希望)です',
@@ -1737,6 +1800,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const manualOnly = isManualOnlyDoctor(doctor);
         const monthlyCount = getDoctorMonthlyCount(doctorId, dateStr);
         const cardiologyMonthlyLimit = getCardiologyMonthlyLimit(doctor);
+        if (!isDoctorActiveOnDate(doctor, dateObj)) errs.push('在籍期間外です');
+        if (isErNightOnlyDoctor(doctor) && role !== 'erNight') {
+            errs.push('内科専攻医枠のため救急夜間のみ担当可能です');
+        }
+        if (isThursdayWardNightOnlyDoctor(doctor) && !(role === 'wardNight' && dateObj.getDay() === 4)) {
+            errs.push('蘆田先生は木曜日の病棟夜間のみ担当可能です');
+        }
         if (monthlyCount >= 3) errs.push('月3回が上限です');
         if (isDutyExcludedDoctor(doctor)) errs.push('当直除外メンバーです');
         if (cardiologyMonthlyLimit && monthlyCount >= cardiologyMonthlyLimit) {
@@ -2009,6 +2079,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const responders = [...latestByName.values()].map(({ doc }) => doc.name);
         const responderSet = new Set(responders.map(normalizeDoctorMatchName));
         const missingDoctors = state.doctors.filter(doc =>
+            isDoctorActiveInMonth(doc) &&
             !isDutyExcludedDoctor(doc) &&
             !isManualOnlyDoctor(doc) &&
             !responderSet.has(normalizeDoctorMatchName(doc.name))
@@ -2119,10 +2190,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Rendering: Doctor List =====
     function renderDoctors() {
         els.doctorList.innerHTML = '';
-        if (state.doctors.length === 0) {
+        const visibleDoctors = state.doctors.filter(doc => isDoctorActiveInMonth(doc));
+        if (visibleDoctors.length === 0) {
             els.doctorList.innerHTML = '<li class="doctor-item" style="color:#aaa;">なし</li>'; return;
         }
-        state.doctors.forEach(doc => {
+        visibleDoctors.forEach(doc => {
             const count = getDoctorMonthlyCount(doc.id);
             const li = document.createElement('li');
             li.className = 'doctor-item';
@@ -2138,6 +2210,8 @@ document.addEventListener('DOMContentLoaded', () => {
 		            if (getMonthlyDutyTarget(doc) > 1) badges += `<span class="badge-erday-pref">月${getMonthlyDutyTarget(doc)}目標</span>`;
 		            if (isIwataYukiyoDoctor(doc)) badges += '<span class="badge-erday-pref">病棟当直</span>';
 		            if (isManualOnlyDoctor(doc)) badges += '<span class="badge-form-missing">手動のみ</span>';
+                    if (isErNightOnlyDoctor(doc)) badges += '<span class="badge-erday-pref">救急夜間のみ</span>';
+                    if (isThursdayWardNightOnlyDoctor(doc)) badges += '<span class="badge-erday-pref">木曜病棟夜間のみ</span>';
             if (isFormNonResponder(doc)) badges += '<span class="badge-form-missing">未回答</span>';
             const opStr = doc.outpatientDays?.length ? doc.outpatientDays.join('・') : 'なし';
             const formData = getDoctorFormDataForMonth(doc);
@@ -2322,7 +2396,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            sel.innerHTML = '<option value="">-- 未割り当て --</option>';
 	            if (role === 'erDay') {
 	                const eligible = state.doctors.filter(d =>
-                        isAutoAssignableDoctor(d) &&
+                        isAutoAssignableDoctor(d, editingDateObj) &&
                         (d.holidayErDayPreferred || canDoErDaySpecialDoctor(d, editingDateObj, editingDateStr))
                     );
 	                if (eligible.length > 0) {
@@ -2335,7 +2409,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	                }
 	            } else if (role === 'wardDay') {
 	                state.doctors.filter(d =>
-                        isAutoAssignableDoctor(d) &&
+                        isAutoAssignableDoctor(d, editingDateObj) &&
 	                    canDoWardDayDoctor(d) &&
 	                    !d.holidayErDayPreferred &&
 	                    canAutoAssignFixedFemaleDoctor(d, editingDateObj, 'wardDay')
@@ -2344,7 +2418,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	                });
 	            } else if (role === 'wardNight') {
 	                state.doctors.filter(d =>
-                        isAutoAssignableDoctor(d) &&
+                        isAutoAssignableDoctor(d, editingDateObj) &&
 	                    canDoWardNightDoctor(d, editingDateObj, editingDateStr) &&
 	                    !d.holidayErDayPreferred &&
 	                    canAutoAssignFixedFemaleDoctor(d, editingDateObj, 'wardNight')
@@ -2353,7 +2427,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	                });
 	            } else if (role === 'erNight') {
 	                state.doctors.filter(d =>
-                        isAutoAssignableDoctor(d) &&
+                        isAutoAssignableDoctor(d, editingDateObj) &&
 	                    canDoErNightDoctor(d) &&
 	                    !d.holidayErDayPreferred &&
 	                    canAutoAssignFixedFemaleDoctor(d, editingDateObj, 'erNight')
@@ -2362,7 +2436,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	                });
 	            }
                 state.doctors
-                    .filter(d => isManualOnlyDoctor(d))
+                    .filter(d => isDoctorActiveOnDate(d, editingDateObj) && isManualOnlyDoctor(d))
                     .forEach(doc => appendDoctorOption(sel, doc, '手動のみ'));
 	            // Ensure current assignee is in the list
 	            const curId = currentShifts[role];
@@ -2400,9 +2474,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else { els.fgs[r].classList.add('hidden'); els.selects[r].value = ''; }
         });
         els.fgs.wardDay.querySelector('label').textContent = '🏥 病棟日中（8年目以上）';
-        const weekdayWardNightChiefNote = !isHol
-            ? ' / 不足時6-7年目可 / 部長は垣内・松本のみ可'
-            : ' / 不足時6-7年目可 / 部長除く';
+        const weekdayWardNightChiefNote = ' / 不足時6-7年目可 / 部長は個別指定者のみ可';
         els.fgs.wardNight.querySelector('label').textContent =
             (isHol && editingDateObj.getDay() === 6)
                 ? `🏥 病棟（8年目以上${weekdayWardNightChiefNote}）`
@@ -2637,7 +2709,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.shifts[dStr].erDay) return;
 
 	            let candidates = state.doctors.filter(doc => {
-                    if (!isAutoAssignableDoctor(doc)) return false;
+                    if (!isAutoAssignableDoctor(doc, dObj)) return false;
 	                if (!needsFormNonResponderDuty(doc)) return false;
 	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
 	                if (!canAutoAssignFixedFemaleDoctor(doc, dObj, 'erDay')) return false;
@@ -2672,7 +2744,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.shifts[dStr].erDay) return;
 
 	            let candidates = state.doctors.filter(doc => {
-                    if (!isAutoAssignableDoctor(doc)) return false;
+                    if (!isAutoAssignableDoctor(doc, dObj)) return false;
 	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
 	                if (!canAutoAssignFixedFemaleDoctor(doc, dObj, 'erDay')) return false;
 	                if (getDoctorPreferenceRank(doc, dStr) !== preferenceRank) return false;
@@ -2707,7 +2779,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.shifts[dStr].erDay) return;
 
 	            let candidates = state.doctors.filter(doc => {
-                    if (!isAutoAssignableDoctor(doc)) return false;
+                    if (!isAutoAssignableDoctor(doc, dObj)) return false;
 	                if (!doc.holidayErDayPreferred && !canDoErDaySpecialDoctor(doc, dObj, dStr)) return false;
 	                if (!canAutoAssignFixedFemaleDoctor(doc, dObj, 'erDay')) return false;
 	                if (getDoctorPreferenceRank(doc, dStr) !== 0) return false;
@@ -2832,7 +2904,11 @@ document.addEventListener('DOMContentLoaded', () => {
 			            '・岩田先生は循環器月1回を優先し、平日・土日祝の病棟当直に候補を絞ります\n' +
 			            '・8月以降の土日救急日中は岸先生・古田先生・梁間先生・上野峻輔先生・近藤先生も候補にします（元の救急日中候補を優先）\n' +
 			            '・松岡 里紗先生は手動選択のみで、自動割り振りには入れません\n' +
-		            '・平日病棟に入る部長は垣内先生・松本先生のみです\n' +
+		            '・平日病棟に入る部長は個別指定者のみです\n' +
+                    '・福嶌愛先生・前田晃宏先生は2026年10月から救急夜間のみです\n' +
+                    '・蘆田建毅先生は2026年10月から木曜日の病棟夜間のみです\n' +
+                    '・西岡唯先生・藤本健太郎先生は2026年10月以降、候補外です\n' +
+                    '・松本大典先生は2026年11月以降、候補外です\n' +
             '・翌日外来は夜間当直のみ禁止（日中は対象外）\n' +
             '・備考欄は自動解釈せず要確認警告として扱います'
         )) return;
@@ -2861,7 +2937,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (state.shifts[dStr][role]) continue;
 
 	                let candidates = state.doctors.filter(doc => {
-	                    if (!isAutoAssignableDoctor(doc)) return false;
+	                    if (!isAutoAssignableDoctor(doc, dObj)) return false;
 	                    if (doc.holidayErDayPreferred) return false;
 	                    if (role === 'wardDay' && !canDoWardDayDoctor(doc)) return false;
                     if (role === 'wardNight' && !canDoWardNightDoctor(doc, dObj, dStr)) return false;
@@ -2915,7 +2991,9 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCalendar();
         let msg = `${made}件割り当てました。`;
         if (skipped > 0) msg += `\n⚠️ ${skipped}枠は条件を満たす医師がおらず未割り当てです。`;
-        const unassignedDoctors = state.doctors.filter(doc => getDoctorMonthlyCount(doc.id) === 0);
+        const unassignedDoctors = state.doctors.filter(doc =>
+            isDoctorActiveInMonth(doc) && getDoctorMonthlyCount(doc.id) === 0
+        );
         if (unassignedDoctors.length > 0) {
             const names = unassignedDoctors.map(d => d.name).join('、');
             msg += `\n⚠️ 月1回未達の通常医師: ${unassignedDoctors.length}名\n${names}`;
@@ -2925,7 +3003,9 @@ document.addEventListener('DOMContentLoaded', () => {
             msg += `\n⚠️ フォーム未回答で月1回未達: ${unassignedNonResponders.length}名\n${unassignedNonResponders.map(d => d.name).join('、')}`;
         }
         const noteAssigned = state.doctors.filter(doc =>
-            getDoctorFormDataForMonth(doc).notes && getDoctorMonthlyCount(doc.id) > 0
+            isDoctorActiveInMonth(doc) &&
+            getDoctorFormDataForMonth(doc).notes &&
+            getDoctorMonthlyCount(doc.id) > 0
         );
         if (noteAssigned.length > 0) {
             msg += `\n⚠️ 備考ありの割り当てがあります。カレンダーの警告を確認してください。`;
