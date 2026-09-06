@@ -178,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: '丹羽諒太郎', group: '医長', holidayErDayPreferred: false, outpatientDays: ['月', '火'] },
         { name: '南部 海', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: ['月'] },
         { name: '垣内 誠司', group: '部長', holidayErDayPreferred: false, outpatientDays: ['月', '火'] },
-        { name: '富垣 成', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: ['水', '木'] },
+        { name: '富垣 成', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: ['水', '木'], availableUntil: '2026-10-31' },
         { name: '梁間 敢', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['火', '水'] },
         { name: '藤岡周太郎', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['水', '金'] },
         { name: '藤本健太郎', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [], availableUntil: '2026-09-30' },
