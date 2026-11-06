@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=20260906-responsive6">
+    <link rel="stylesheet" href="./styles.css?v=20261106-doctor-settings1">
     <!-- SheetJS-compatible library with style support for Excel export -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -150,6 +150,48 @@
         </div>
     </div>
 
+    <!-- Modal for Doctor Settings (個別設定) -->
+    <div id="doctor-settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="doctor-settings-title" aria-hidden="true">
+        <div class="modal-overlay" id="doctor-settings-overlay"></div>
+        <div class="modal-content doctor-settings-content">
+            <div class="modal-header">
+                <h3 id="doctor-settings-title">個別設定</h3>
+                <button class="close-btn" id="close-doctor-settings" aria-label="閉じる">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-date-info" id="doctor-settings-name"></p>
+                <label class="setting-toggle" for="doctor-setting-paused">
+                    <input type="checkbox" id="doctor-setting-paused">
+                    <span class="setting-toggle-text">
+                        <strong>当直休止</strong>
+                        <span>自動割り振りの対象から外します。手動の候補には「休止中」と表示され、選ぶと保存前に確認が出ます。</span>
+                    </span>
+                </label>
+                <label class="setting-toggle" for="doctor-setting-ward-night">
+                    <input type="checkbox" id="doctor-setting-ward-night">
+                    <span class="setting-toggle-text">
+                        <strong>病棟夜間も可</strong>
+                        <span>病棟夜間の候補に表示し、手動で選べるようにします。自動割り振りには入りません。翌日が外来の夜は入れません。</span>
+                    </span>
+                </label>
+                <label class="setting-toggle" for="doctor-setting-holiday-relaxed">
+                    <input type="checkbox" id="doctor-setting-holiday-relaxed">
+                    <span class="setting-toggle-text">
+                        <strong>休日上限の緩和</strong>
+                        <span>土日祝の上限を月2回から月3回にします。自動割り振りにも適用します。</span>
+                    </span>
+                </label>
+                <p class="sync-help-text">共有保存を設定している場合は、保存すると共有データにも反映されます。</p>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-doctor-settings" class="btn-secondary">キャンセル</button>
+                <button id="save-doctor-settings" class="btn-primary">保存する</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal for Assignment -->
     <div id="assignment-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
         <div class="modal-overlay" id="modal-overlay"></div>
@@ -203,6 +245,6 @@
         </div>
     </div>
 
-    <script src="./app.js?v=20260906-departments1"></script>
+    <script src="./app.js?v=20261106-doctor-settings1"></script>
 </body>
 </html>

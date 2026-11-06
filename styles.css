@@ -100,6 +100,21 @@ button:focus-visible, input:focus-visible, select:focus-visible, .csv-label:focu
 .remove-doctor-btn:hover { color: var(--danger); }
 .remove-doctor-btn svg { width: 16px; height: 16px; }
 
+/* 個別設定（医師一覧の「設定」ボタンと設定画面） */
+.doctor-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: 8px; }
+.doctor-settings-btn { border: 1px solid var(--border); background: var(--bg-card); color: var(--text-main); font-size: 0.75rem; font-weight: 600; padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
+.doctor-settings-btn:hover { border-color: var(--primary); color: var(--primary); }
+.doctor-settings-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.doctor-item.doctor-paused { border-left-color: #9ca3af; background: #f9fafb; }
+.doctor-item.doctor-paused .doctor-info { opacity: 0.72; }
+.doctor-settings-content { max-width: 520px; }
+.setting-toggle { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; }
+.setting-toggle:hover { border-color: var(--border-focus); }
+.setting-toggle input[type="checkbox"] { width: 18px; height: 18px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--primary); }
+.setting-toggle-text { display: flex; flex-direction: column; gap: 2px; }
+.setting-toggle-text strong { font-size: 0.9rem; }
+.setting-toggle-text span { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+
 /* Group Badges */
 .badge-group { font-size: 0.6rem; padding: 2px 5px; border-radius: 4px; font-weight: 700; margin-left: 4px; white-space: nowrap; }
 .badge-group-35 { background: #dbeafe; color: #1e40af; }
@@ -676,4 +691,11 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   #cancel-sync-settings { grid-column: 1; grid-row: 1; }
   #save-sync-settings { grid-column: 2; grid-row: 1; }
   #disable-sync-settings { grid-column: 1 / -1; grid-row: 2; }
+  .doctor-settings-btn { min-height: 44px; min-width: 52px; padding: 0 10px; font-size: 0.85rem; }
+  .modal .setting-toggle input[type="checkbox"] { width: 22px; height: 22px; min-height: 0; padding: 0 !important; }
+  #doctor-settings-modal .modal-footer button { flex: 1 1 0; }
+}
+
+@media (min-width: 768px) and (max-width: 1099px) {
+  .doctor-settings-btn { min-height: 44px; padding: 0 10px; }
 }
