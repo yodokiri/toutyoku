@@ -220,7 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: '藤田 光一', group: '部長', holidayErDayPreferred: true, outpatientDays: ['火', '木'] },
         { name: '近藤 和也', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['月', '火'] },
         { name: '酒牧 弘誠', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
-        { name: '今中 友香', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['水'] },
+        { name: '今中 友香', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['水'], dutyPaused: true }, // 2026-11-07 一覧に戻す際、休止中として戻す（11/19・11/22・12/29の差し替えから休職と推定）
         { name: '服部 洸輝', group: '医長', holidayErDayPreferred: true, outpatientDays: ['火', '金'] },
         { name: '水本 綾', group: '部長', holidayErDayPreferred: false, outpatientDays: ['火', '木'] },
         { name: '田中 康史', group: '部長', holidayErDayPreferred: true, outpatientDays: ['月', '火', '水', '木', '金'] },
@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: '岸 具宏', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['月', '水'] },
         { name: '椿 遥花', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
         { name: '渡邊 有史', group: '副医長', holidayErDayPreferred: false, outpatientDays: ['木'] },
-        { name: '箱谷 聡', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [] },
+        { name: '箱谷 聡', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [], availableUntil: '2026-10-31' }, // 2026-11-07 利用者依頼で一覧から外す
         { name: '西岡 唯', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [], availableUntil: '2026-09-30' },
         { name: '福嶌愛', group: '3-5年目', holidayErDayPreferred: false, outpatientDays: [], availableFrom: '2026-10-01' },
         { name: '重岡 靖', group: '部長', holidayErDayPreferred: false, outpatientDays: ['月', '水', '木', '金'] },
@@ -1027,17 +1027,27 @@ document.addEventListener('DOMContentLoaded', () => {
         activeMobilePanel: 'calendar'
     };
 
+    // 在籍終了日のないマスタ医師は、共有データから消えていても読み込み時に一覧へ戻す（2026-11-07 利用者依頼）。
+    // 一覧の「×」（削除）は廃止済み。一覧から外す医師は DEFAULT_DOCTORS の availableUntil で外す。
+    function getRequiredDoctorNames() {
+        return new Set([
+            ...REQUIRED_EXTRA_DOCTOR_NAMES,
+            ...DEFAULT_DOCTORS.filter(doc => !doc.availableUntil).map(doc => doc.name)
+        ]);
+    }
+
+    // 戻した医師の名前を返す（戻した医師がいなければ空の配列）
     function ensureRequiredExtraDoctors() {
-        let changed = false;
-        REQUIRED_EXTRA_DOCTOR_NAMES.forEach(name => {
+        const added = [];
+        getRequiredDoctorNames().forEach(name => {
             const exists = state.doctors.some(doc => normalizeDoctorMatchName(doc.name) === normalizeDoctorMatchName(name));
             if (exists) return;
             const defaultDoctor = DEFAULT_DOCTORS.find(doc => normalizeDoctorMatchName(doc.name) === normalizeDoctorMatchName(name));
             if (!defaultDoctor) return;
             state.doctors.push(buildDoctorFromDefault(defaultDoctor));
-            changed = true;
+            added.push(defaultDoctor.name);
         });
-        return changed;
+        return added;
     }
 
     const syncState = {
@@ -1406,8 +1416,8 @@ document.addEventListener('DOMContentLoaded', () => {
             renderDoctors();
             renderCalendar();
             renderSyncStatusFromMeta();
-            if (addedRequiredDoctors) {
-                updateSyncStatus('local-changed', '未共有変更あり', '新規医師マスタ追加はこの端末に保存済みです。共有するには「共有保存」を押してください。');
+            if (addedRequiredDoctors.length > 0) {
+                updateSyncStatus('local-changed', '未共有変更あり', `一覧に戻した医師があります（${addedRequiredDoctors.join('、')}）。この端末に保存済みです。共有するには「共有保存」を押してください。`);
             }
             if (!options.silent) alert('共有保存から最新データを読み込みました。');
             return true;
@@ -2211,17 +2221,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function removeDoctor(id) {
-        if (!confirm('削除しますか？')) return;
-        state.doctors = state.doctors.filter(d => d.id !== id);
-        for (const date in state.shifts) {
-            for (const role in state.shifts[date]) {
-                if (state.shifts[date][role] === id) delete state.shifts[date][role];
-            }
-            if (Object.keys(state.shifts[date]).length === 0) delete state.shifts[date];
-        }
-        saveData('医師削除'); renderDoctors(); renderCalendar();
-    }
+    // 医師一覧からの削除（×）は2026-11-07に廃止した。削除すると全期間の割り当てが消えるため。
+    // 退職などで外す医師は DEFAULT_DOCTORS の availableUntil（在籍終了日）で外し、休職などは個別設定の「当直休止」を使う。
 
     function applyFormResponseRows(rows) {
         const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth() + 1;
@@ -2422,15 +2423,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="doctor-actions">
                     <button type="button" class="doctor-settings-btn" data-id="${doc.id}" aria-label="${doc.name}の個別設定" title="${doc.name}の個別設定">設定</button>
-                    <button class="remove-doctor-btn" data-id="${doc.id}" aria-label="${doc.name}を削除" title="${doc.name}を削除">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                    </button>
                 </div>`;
             els.doctorList.appendChild(li);
         });
-        els.doctorList.querySelectorAll('.remove-doctor-btn').forEach(b =>
-            b.addEventListener('click', e => removeDoctor(e.currentTarget.dataset.id))
-        );
         els.doctorList.querySelectorAll('.doctor-settings-btn').forEach(b =>
             b.addEventListener('click', e => openDoctorSettings(e.currentTarget.dataset.id))
         );
@@ -3524,7 +3519,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		            '・山口先生は自動割り振りでは病棟当直月1回までにします（手動例外可）\n' +
 		            '・吉田也恵先生は固定女性医師ルールから外し、日中枠には入れません\n' +
 			            '・久保山先生は土曜救急日中の候補にします（第1・第3土曜は固定）\n' +
-			            '・椿先生・箱谷先生は当直除外メンバーとして自動候補から外します\n' +
+			            '・椿先生は当直除外メンバーとして自動候補から外します\n' +
 			            '・小澤牧人先生は金曜病棟当直のみ、月1回まで候補にします\n' +
 			            '・南部先生は月3回を目標に優先します（最大3回まで）\n' +
 			            '・岩田先生は循環器月1回を優先し、平日・土日祝の病棟当直に候補を絞ります\n' +
@@ -3535,6 +3530,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     '・蘆田建毅先生は2026年10月から木曜日の病棟夜間のみです\n' +
                     '・西岡唯先生・藤本健太郎先生は2026年10月以降、候補外です\n' +
                     '・松本大典先生は2026年11月以降、候補外です\n' +
+                    '・箱谷先生は2026年11月以降、一覧と候補から外します\n' +
             '・翌日外来は夜間当直のみ禁止（日中は対象外）\n' +
             '・備考欄は自動解釈せず要確認警告として扱います'
         )) return;
@@ -3825,7 +3821,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.doctors.length === 0) {
             state.doctors = buildDefaultDoctors();
             saveData('初期医師マスタ作成');
-        } else if (ensureRequiredExtraDoctors()) {
+        } else if (ensureRequiredExtraDoctors().length > 0) {
             saveLocalOnlyData('新規医師マスタ追加');
         } else if (!loadedShared) {
             saveLocalData();

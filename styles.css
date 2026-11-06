@@ -96,9 +96,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, .csv-label:focu
 .doctor-name { font-weight: 600; font-size: 0.95rem; }
 .doctor-meta { font-size: 0.75rem; color: var(--text-muted); line-height: 1.45; }
 .doctor-count { font-size: 0.8rem; font-weight: 600; }
-.remove-doctor-btn { color: #9ca3af; }
-.remove-doctor-btn:hover { color: var(--danger); }
-.remove-doctor-btn svg { width: 16px; height: 16px; }
 
 /* 個別設定（医師一覧の「設定」ボタンと設定画面） */
 .doctor-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: 8px; }
@@ -298,14 +295,6 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   .app-container[data-mobile-view="doctors"] .sidebar { display: flex; }
   .app-container.mobile-doctors-active .calendar-section,
   .app-container[data-mobile-view="doctors"] .calendar-section { display: none; }
-  .remove-doctor-btn {
-    width: 44px;
-    height: 44px;
-    flex: 0 0 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
 }
 
 /* Mobile week view */
@@ -454,15 +443,6 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   }
   .doctor-list-container { padding: 8px 12px; }
   .doctor-item { min-height: 52px; padding: 6px 8px 6px 12px; }
-  .remove-doctor-btn {
-    width: 44px;
-    height: 44px;
-    flex: 0 0 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .remove-doctor-btn svg { width: 20px; height: 20px; }
   .sidebar-footer { padding: 8px 12px; gap: 6px; }
   .sidebar-footer button { min-height: 44px; }
 
