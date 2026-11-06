@@ -171,6 +171,10 @@ document.addEventListener('DOMContentLoaded', () => {
         '2027-01-02': { erDay: ['焦 圭裕'], wardDay: ['金 容壱', '水本 綾'], wardNight: ['竹重 遼'] },
         '2027-01-03': { erDay: ['救急医'], wardDay: ['岩根 成豪', '北村 泰明'], wardNight: ['丹羽諒太郎'] }
     };
+    // 固定表の救急日中のうち、「休日救急日中を担当した月は他枠不可」に数えない担当（例外的に入った分）
+    const FIXED_ER_DAY_EXCLUSIVITY_EXEMPT_BY_DATE = {
+        '2026-12-29': ['岸 具宏'] // 今中先生の代わりに例外的に担当。12月の他枠にも入れる（2026-11-06 利用者）
+    };
 
     // 現行マスタ。入退職後も過去の割り付けを表示できるよう、在籍期間付きで保持する。
     // dutyPaused / wardNightAllowed / holidayLimitRelaxed は「個別設定」の初期値。画面で保存した値が優先される。
@@ -385,6 +389,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
         }
+    }
+    function isFixedErDayExclusivityExempt(dateStr, doctorId) {
+        const names = FIXED_ER_DAY_EXCLUSIVITY_EXEMPT_BY_DATE[dateStr] || [];
+        return names.some(name => getFixedDutyDoctorId(name) === doctorId);
     }
     function countFixedDutiesForDoctor(doctorId, predicate = null) {
         let count = 0;
@@ -1765,7 +1773,8 @@ document.addEventListener('DOMContentLoaded', () => {
             (!excludeDate || ds !== excludeDate) &&
             sd.getFullYear() === y &&
             sd.getMonth() === m &&
-            role === 'erDay'
+            role === 'erDay' &&
+            !isFixedErDayExclusivityExempt(ds, doctorId)
         ) > 0;
     }
 
