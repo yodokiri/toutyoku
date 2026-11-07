@@ -462,6 +462,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function getHolidayDutyMonthlyLimit(doc) {
         return isHolidayLimitRelaxedDoctor(doc) ? RELAXED_HOLIDAY_DUTY_MONTHLY_LIMIT : HOLIDAY_DUTY_MONTHLY_LIMIT;
     }
+    // 「休日上限の緩和」の医師は、休日救急日中まわりの保存不可（月1回まで・同じ月の他枠不可）を手動の一時許可にする。
+    // 自動割り振りは従来どおり、これらに当たる候補を使わない（2026-11-07 安部先生の指摘）。
+    function withHolidayRelaxedOverride(doc, message) {
+        return isHolidayLimitRelaxedDoctor(doc) ? `${message}（休日上限の緩和：手動例外可）` : message;
+    }
     function getTodayDateStr() {
         return formatDateStr(new Date());
     }
@@ -1946,7 +1951,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function isHardRuleError(error) {
         if (!error) return false;
-        return [
+        const hardTokens = [
             '上限に達しています',
             '休日救急日中希望がOFFです',
             '休日救急日中は月1回が上限です',
@@ -1979,7 +1984,11 @@ document.addEventListener('DOMContentLoaded', () => {
             '前月最終週の休日にも当直があります',
             '翌月第一週の休日にも当直があります',
             '同日の別枠に割り当て済みです'
-        ].some(token => error.includes(token));
+        ];
+        // checkAssignmentRule は項目を ' / ' でつなぐ。「手動例外可」と書いた項目は、保存不可の語を含んでいても一時許可として扱う
+        return error.split(' / ').some(part =>
+            !part.includes('手動例外可') && hardTokens.some(token => part.includes(token))
+        );
     }
 
     // ===== Assignment Rule Checking =====
@@ -2049,9 +2058,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     const sd = new Date(ds);
                     if (sd.getFullYear() === y && sd.getMonth() === mo && sh.erDay === doctorId && ds !== dateStr) erDayCount++;
                 }
-                if (erDayCount >= 1) errs.push('休日救急日中は月1回が上限です');
+                if (erDayCount >= 1) errs.push(withHolidayRelaxedOverride(doctor, '休日救急日中は月1回が上限です'));
                 // Exclusivity: has other shifts this month?
-                if (hasNonErDayThisMonth(doctorId, dateStr)) errs.push('今月他の当直枠があるため休日救急日中に割り当てられません');
+                if (hasNonErDayThisMonth(doctorId, dateStr)) errs.push(withHolidayRelaxedOverride(doctor, '今月他の当直枠があるため休日救急日中に割り当てられません'));
             } else if (role === 'erNight') {
                 if (!canDoErNightDoctor(doctor)) errs.push('救急夜間は7年目以下、または岸先生のみ担当可能です');
             } else if (role === 'wardDay') {
@@ -2085,7 +2094,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Month exclusivity reverse: has erDay this month → can't do other roles
         if (!manualOnly && role !== 'erDay' && hasErDayThisMonth(doctorId, dateStr)) {
-            errs.push('今月休日救急日中を担当済みのため、他枠への割り当て不可です');
+            errs.push(withHolidayRelaxedOverride(doctor, '今月休日救急日中を担当済みのため、他枠への割り当て不可です'));
         }
 
         // 2. Outpatient: 翌日外来は夜間当直のみ考慮し、日直(日中)では考慮しない
@@ -3505,6 +3514,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            '・同じ日は、可能な限り異なる科の医師を割り当てます\n' +
 	            '・月4回以上は不可（最大3回まで）\n' +
 	            `・土日祝は月${HOLIDAY_DUTY_MONTHLY_LIMIT}回まで（個別設定で「休日上限の緩和」を付けた医師は月${RELAXED_HOLIDAY_DUTY_MONTHLY_LIMIT}回まで）\n` +
+	            '・「休日上限の緩和」の医師も、休日救急日中の月1回・同じ月の他枠不可は自動割り振りでは守ります（手動なら一時許可で保存できます）\n' +
 	            '・個別設定で「当直休止」を付けた医師は、自動割り振りの対象から外します\n' +
 	            '・個別設定の「病棟夜間も可」は手動選択用です。自動割り振りでは使いません\n' +
 	            '・固定不可曜日は不可\n' +
