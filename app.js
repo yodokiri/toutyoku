@@ -462,8 +462,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function getHolidayDutyMonthlyLimit(doc) {
         return isHolidayLimitRelaxedDoctor(doc) ? RELAXED_HOLIDAY_DUTY_MONTHLY_LIMIT : HOLIDAY_DUTY_MONTHLY_LIMIT;
     }
-    // 「休日上限の緩和」の医師は、休日救急日中まわりの保存不可（月1回まで・同じ月の他枠不可）を手動の一時許可にする。
+    // 「休日上限の緩和」の医師は、休日救急日中まわり（月1回まで・同じ月の他枠不可）を手動では一時許可（黄）として表示する。
     // 自動割り振りは従来どおり、これらに当たる候補を使わない（2026-11-07 安部先生の指摘）。
+    // 手動は2026-11-07から、同じ日に同じ先生などを除き、どの規則もチェックを付ければ保存できる（collectModalIssues）。
     function withHolidayRelaxedOverride(doc, message) {
         return isHolidayLimitRelaxedDoctor(doc) ? `${message}（休日上限の緩和：手動例外可）` : message;
     }
@@ -958,6 +959,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let editingDateStr = null;
     let editingDateObj = null;
     let assignmentReturnFocus = null;
+    let modalOverrideAckKey = '';
     let syncSettingsReturnFocus = null;
 
     const STORAGE_KEYS = {
@@ -1131,6 +1133,8 @@ document.addEventListener('DOMContentLoaded', () => {
         saveAssignmentBtn: document.getElementById('save-assignment'),
         modalDateDisplay: document.getElementById('modal-date-display'),
         modalWarnings: document.getElementById('modal-warnings'),
+        overrideConfirm: document.getElementById('override-confirm'),
+        overrideConfirmCheckbox: document.getElementById('override-confirm-checkbox'),
         selectDayType: document.getElementById('select-day-type'),
         selects: {
             wardDay: document.getElementById('select-ward-day'),
@@ -1986,6 +1990,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '同日の別枠に割り当て済みです'
         ];
         // checkAssignmentRule は項目を ' / ' でつなぐ。「手動例外可」と書いた項目は、保存不可の語を含んでいても一時許可として扱う
+        // 手動では2026-11-07から、ここに当たる項目も赤い注意として出し、チェックを付ければ保存できる（止めるのは isBlockingManualError だけ）
         return error.split(' / ').some(part =>
             !part.includes('手動例外可') && hardTokens.some(token => part.includes(token))
         );
@@ -2943,15 +2948,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
 		    // ===== Modal =====
     function appendDoctorOption(sel, doc, labelSuffix = '') {
-        if (!sel || !doc) return;
+        if (!sel || !doc) return null;
         const options = sel.options ? Array.from(sel.options) : Array.from(sel.querySelectorAll('option'));
         const exists = options.some(option => option.value === doc.id);
-        if (exists) return;
+        if (exists) return null;
         const opt = document.createElement('option');
         opt.value = doc.id;
         const suffix = labelSuffix ? ` / ${labelSuffix}` : '';
         opt.textContent = `${doc.name} [${doc.group}${suffix}] (${getDoctorMonthlyCount(doc.id)}回)`;
         sel.appendChild(opt);
+        return opt;
     }
 
     function getModalRoleCandidateFilter(role) {
@@ -3018,6 +3024,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     (isRoleCandidate(d) || isWardNightPermissionCandidate(d))
                 )
                 .forEach(doc => appendDoctorOption(sel, doc, '休止中'));
+            // 条件に合わない先生も、手動では一覧の最後から選べる（選ぶと注意が出て、チェックを付ければ保存できる。2026-11-07 利用者）
+            const listedDoctorIds = new Set(Array.from(sel.options).map(option => option.value));
+            const outOfConditionDoctors = state.doctors.filter(d =>
+                isDoctorActiveOnDate(d, editingDateObj) && !listedDoctorIds.has(d.id)
+            );
+            if (outOfConditionDoctors.length > 0) {
+                const outGroup = document.createElement('optgroup');
+                outGroup.label = '条件外の先生（選ぶと注意が出ます）';
+                outOfConditionDoctors.forEach(doc => {
+                    const option = appendDoctorOption(outGroup, doc, '条件外');
+                    if (option) option.dataset.outOfCondition = '1';
+                });
+                sel.appendChild(outGroup);
+            }
 	            // Ensure current assignee is in the list
 	            const curId = currentShifts[role];
             if (curId) {
@@ -3025,7 +3045,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 for (const o of sel.options) { if (o.value === curId) { found = true; break; } }
                 if (!found) {
                     const n = findDoctorName(curId);
-                    if (n) { const opt = document.createElement('option'); opt.value = curId; opt.textContent = `${n} (対象外)`; sel.appendChild(opt); }
+                    if (n) { const opt = document.createElement('option'); opt.value = curId; opt.textContent = `${n} (対象外)`; opt.dataset.outOfCondition = '1'; sel.appendChild(opt); }
                 }
             }
         });
@@ -3094,14 +3114,56 @@ document.addEventListener('DOMContentLoaded', () => {
         const dS = state.shifts[dStr] || {};
         const roles = getRequiredRoles(dObj, dStr).filter(role => !isFixedSpecialDutyRole(dStr, role));
         roles.forEach(r => { if (els.selects[r]) els.selects[r].value = dS[r] || ''; });
+        els.overrideConfirmCheckbox.checked = false;
+        modalOverrideAckKey = '';
         updateModalState();
         els.modal.classList.remove('hidden');
         els.modal.setAttribute('aria-hidden', 'false');
         window.requestAnimationFrame(() => els.closeModalBtn.focus());
     }
 
+    // 手動でも保存できない（チェックを付けても保存できない）項目：医師データなし、同じ日に同じ先生（2026-11-07 利用者）
+    function isBlockingManualError(error) {
+        return String(error || '').split(' / ').some(part =>
+            part === '医師が見つかりません' || part.includes('同日の別枠に割り当て済みです')
+        );
+    }
+
+    // 画面で選んでいる割り当て（保存すると書き込まれる内容）
+    function getModalSelectedShifts() {
+        const selected = {};
+        for (const [role, sel] of Object.entries(els.selects)) {
+            if (sel.closest('.form-group').classList.contains('hidden') || sel.classList.contains('hidden') || !sel.value) continue;
+            selected[role] = sel.value;
+        }
+        return selected;
+    }
+
+    // 画面で選んでいる内容を保存したものとして判定する。
+    // 保存済みの割り当てと比べると、同じ日の中で先生を別の枠へ移すだけでも「同日の別枠」で止まるため（2026-11-07）
+    function withModalSelectedShifts(callback) {
+        const hadDay = Object.prototype.hasOwnProperty.call(state.shifts, editingDateStr);
+        const savedDay = state.shifts[editingDateStr];
+        const modalDay = { ...(savedDay || {}) };
+        ['wardDay', 'wardNight', 'erDay', 'erNight'].forEach(role => delete modalDay[role]);
+        Object.assign(modalDay, getModalSelectedShifts());
+        state.shifts[editingDateStr] = modalDay;
+        try {
+            return callback();
+        } finally {
+            if (hadDay) state.shifts[editingDateStr] = savedDay;
+            else delete state.shifts[editingDateStr];
+        }
+    }
+
+    // 手動の割り当ての判定（2026-11-07 利用者の依頼で、同じ日に同じ先生などを除き、規則に当たってもチェックを付ければ保存できる）
+    //   blockingErrors: 保存不可 / strongOverrideErrors: 以前は保存不可だった規則（赤） / overrideErrors: 一時許可（黄） / warns: 注意のみ
     function collectModalIssues() {
-        const fatalErrors = [], overrideErrors = [], warns = [], checks = {};
+        const blockingErrors = [], strongOverrideErrors = [], overrideErrors = [], warns = [], levels = {};
+        const LEVEL_RANK = { warn: 1, override: 2, strong: 3, blocking: 4 };
+        const raiseLevel = (role, level) => {
+            if (!levels[role] || LEVEL_RANK[level] > LEVEL_RANK[levels[role]]) levels[role] = level;
+        };
         const override = els.selectDayType.value;
         let modalIsHol;
         if (override === 'weekday') modalIsHol = false;
@@ -3109,15 +3171,15 @@ document.addEventListener('DOMContentLoaded', () => {
         else modalIsHol = isHoliday(editingDateObj, editingDateStr);
         // Cross-check: same doctor in multiple roles
         const selectedMap = {};
-        for (const [role, sel] of Object.entries(els.selects)) {
-            if (sel.closest('.form-group').classList.contains('hidden') || sel.classList.contains('hidden') || !sel.value) continue;
-            if (!selectedMap[sel.value]) selectedMap[sel.value] = [];
-            selectedMap[sel.value].push(role);
+        for (const [role, doctorId] of Object.entries(getModalSelectedShifts())) {
+            if (!selectedMap[doctorId]) selectedMap[doctorId] = [];
+            selectedMap[doctorId].push(role);
         }
         for (const [id, roles] of Object.entries(selectedMap)) {
             if (roles.length > 1) {
                 const n = findDoctorName(id);
-                fatalErrors.push(`${n || id} が複数枠に割り当てられています`);
+                blockingErrors.push(`${n || id} が複数枠に割り当てられています（同じ日に同じ先生は不可）`);
+                roles.forEach(role => raiseLevel(role, 'blocking'));
             }
         }
         const selectedDepartments = {};
@@ -3126,26 +3188,54 @@ document.addEventListener('DOMContentLoaded', () => {
             const department = getDoctorDepartment(doctor);
             if (!department) continue;
             if (!selectedDepartments[department]) selectedDepartments[department] = [];
-            selectedDepartments[department].push(doctor.name);
+            selectedDepartments[department].push(doctor);
         }
-        for (const [department, names] of Object.entries(selectedDepartments)) {
-            if (names.length > 1) {
-                warns.push(`同じ科（${department}）の医師が同日に入っています: ${names.join('・')}`);
+        const sameDepartmentIds = new Set();
+        for (const [department, doctors] of Object.entries(selectedDepartments)) {
+            if (doctors.length > 1) {
+                warns.push(`同じ科（${department}）の医師が同日に入っています: ${doctors.map(doc => doc.name).join('・')}`);
+                doctors.forEach(doc => {
+                    sameDepartmentIds.add(doc.id);
+                    selectedMap[doc.id].forEach(role => raiseLevel(role, 'warn'));
+                });
             }
         }
-        for (const [role, sel] of Object.entries(els.selects)) {
-            if (sel.closest('.form-group').classList.contains('hidden') || sel.classList.contains('hidden') || !sel.value) continue;
-            const chk = checkAssignmentRule(sel.value, role, editingDateObj);
-            checks[role] = chk;
-            if (!chk.valid) {
-                const msg = `${getRoleLabelForDayType(role, editingDateObj, modalIsHol)}: ${chk.error}`;
-                if (chk.error === '医師が見つかりません' || isHardRuleError(chk.error)) fatalErrors.push(msg);
-                else overrideErrors.push(msg);
-            } else if (chk.warning) {
-                warns.push(`${getRoleLabelForDayType(role, editingDateObj, modalIsHol)}: ${chk.warning}`);
+        withModalSelectedShifts(() => {
+            for (const [role, sel] of Object.entries(els.selects)) {
+                if (sel.closest('.form-group').classList.contains('hidden') || sel.classList.contains('hidden') || !sel.value) continue;
+                const chk = checkAssignmentRule(sel.value, role, editingDateObj);
+                const roleLabel = getRoleLabelForDayType(role, editingDateObj, modalIsHol);
+                const setLevel = level => raiseLevel(role, level);
+                let error = chk.error;
+                // 画面の中での重複は上の「複数枠」で知らせるので、同日の別枠の項目は重ねて出さない
+                if (error && selectedMap[sel.value].length > 1) {
+                    error = error.split(' / ').filter(part => !part.includes('同日の別枠に割り当て済みです')).join(' / ') || null;
+                }
+                const selectedOption = sel.selectedOptions[0];
+                const outOfCondition = !!(selectedOption && selectedOption.dataset.outOfCondition === '1');
+                if (error) {
+                    const msg = `${roleLabel}: ${error}`;
+                    if (isBlockingManualError(error)) { blockingErrors.push(msg); setLevel('blocking'); }
+                    else if (isHardRuleError(error)) { strongOverrideErrors.push(msg); setLevel('strong'); }
+                    else { overrideErrors.push(msg); setLevel('override'); }
+                } else if (outOfCondition) {
+                    // 一覧の「条件外の先生」から選び、規則の文言には当たらない場合も注意を出す
+                    strongOverrideErrors.push(`${roleLabel}: この枠の候補の条件に合いません（条件外の先生）`);
+                    setLevel('strong');
+                }
+                if (!chk.error && chk.warning) {
+                    // 画面の中の同じ科の重なりは上の「同じ科」の注意で知らせるので、枠ごとには重ねて出さない
+                    const warning = sameDepartmentIds.has(sel.value)
+                        ? chk.warning.split(' / ').filter(part => !part.includes('同じ日に同じ科')).join(' / ')
+                        : chk.warning;
+                    if (warning) {
+                        warns.push(`${roleLabel}: ${warning}`);
+                        setLevel('warn');
+                    }
+                }
             }
-        }
-        return { fatalErrors, overrideErrors, warns, checks };
+        });
+        return { blockingErrors, strongOverrideErrors, overrideErrors, warns, levels };
     }
 
     function updateModalState() {
@@ -3156,19 +3246,29 @@ document.addEventListener('DOMContentLoaded', () => {
             sel.classList.remove('has-warning', 'has-soft-warning');
             if (sel.closest('.form-group').classList.contains('hidden') || sel.classList.contains('hidden')) continue;
             if (!sel.value) continue;
-            const chk = issues.checks[role];
-            if (!chk) continue;
-            if (!chk.valid) {
-                const isFatal = chk.error === '医師が見つかりません' || isHardRuleError(chk.error);
-                sel.classList.add(isFatal ? 'has-warning' : 'has-soft-warning');
-            }
-            else if (chk.warning) sel.classList.add('has-soft-warning');
+            const level = issues.levels[role];
+            if (level === 'blocking' || level === 'strong') sel.classList.add('has-warning');
+            else if (level === 'override' || level === 'warn') sel.classList.add('has-soft-warning');
         }
 
-        if (issues.fatalErrors.length || issues.overrideErrors.length || issues.warns.length) {
+        // 規則に当たる割り当ては、注意を確認してチェックを付けると保存できる。注意の中身が変わったらチェックを外す
+        const ackItems = [...issues.strongOverrideErrors, ...issues.overrideErrors];
+        const needsAck = issues.blockingErrors.length === 0 && ackItems.length > 0;
+        const ackKey = needsAck ? ackItems.join('\n') : '';
+        if (ackKey !== modalOverrideAckKey) {
+            els.overrideConfirmCheckbox.checked = false;
+            modalOverrideAckKey = ackKey;
+        }
+        els.overrideConfirm.classList.toggle('hidden', !needsAck);
+        els.overrideConfirm.classList.toggle('is-strong', issues.strongOverrideErrors.length > 0);
+        els.saveAssignmentBtn.disabled = needsAck && !els.overrideConfirmCheckbox.checked;
+
+        const ackNote = needsAck ? '（下のチェックを付けると保存できます）' : '';
+        if (issues.blockingErrors.length || ackItems.length || issues.warns.length) {
             els.modalWarnings.innerHTML =
-                (issues.fatalErrors.length ? `<div class="modal-error">❌ 保存不可<br>${issues.fatalErrors.join('<br>')}</div>` : '') +
-                (issues.overrideErrors.length ? `<div class="modal-warnings">⚠️ 一時許可できます<br>${issues.overrideErrors.join('<br>')}</div>` : '') +
+                (issues.blockingErrors.length ? `<div class="modal-error">❌ 保存不可<br>${issues.blockingErrors.join('<br>')}</div>` : '') +
+                (issues.strongOverrideErrors.length ? `<div class="modal-error">❗ 規則に当たります${ackNote}<br>${issues.strongOverrideErrors.join('<br>')}</div>` : '') +
+                (issues.overrideErrors.length ? `<div class="modal-warnings">⚠️ 一時許可できます${ackNote}<br>${issues.overrideErrors.join('<br>')}</div>` : '') +
                 (issues.warns.length ? `<div class="modal-warnings">⚠️ ${issues.warns.join('<br>')}</div>` : '');
             els.modalWarnings.classList.remove('hidden');
         } else {
@@ -3186,16 +3286,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveAssignment() {
         const issues = collectModalIssues();
-        if (issues.fatalErrors.length > 0) {
-            alert('保存できません。\n\n' + issues.fatalErrors.join('\n'));
+        if (issues.blockingErrors.length > 0) {
+            alert('保存できません。\n\n' + issues.blockingErrors.join('\n'));
             return;
         }
-        if (issues.overrideErrors.length > 0) {
-            const ok = confirm(
-                '以下の項目は一時的な例外として保存できます。\n保存しますか？\n\n' +
-                issues.overrideErrors.join('\n')
-            );
-            if (!ok) return;
+        const needsAck = issues.strongOverrideErrors.length > 0 || issues.overrideErrors.length > 0;
+        if (needsAck && !els.overrideConfirmCheckbox.checked) {
+            alert('規則に当たる割り当てがあります。\n注意を確認して「注意を確認したうえで保存する」にチェックを付けてから保存してください。');
+            els.overrideConfirmCheckbox.focus();
+            return;
         }
 
         // Save day type override
@@ -3236,6 +3335,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     Object.values(els.selects).forEach(sc => sc.addEventListener('change', updateModalState));
     els.selectDayType.addEventListener('change', () => { updateModalRoles(); updateModalState(); });
+    els.overrideConfirmCheckbox.addEventListener('change', updateModalState);
     els.closeModalBtn.addEventListener('click', closeModal);
     els.cancelAssignmentBtn.addEventListener('click', closeModal);
     els.saveAssignmentBtn.addEventListener('click', saveAssignment);
@@ -3514,7 +3614,8 @@ document.addEventListener('DOMContentLoaded', () => {
 	            '・同じ日は、可能な限り異なる科の医師を割り当てます\n' +
 	            '・月4回以上は不可（最大3回まで）\n' +
 	            `・土日祝は月${HOLIDAY_DUTY_MONTHLY_LIMIT}回まで（個別設定で「休日上限の緩和」を付けた医師は月${RELAXED_HOLIDAY_DUTY_MONTHLY_LIMIT}回まで）\n` +
-	            '・「休日上限の緩和」の医師も、休日救急日中の月1回・同じ月の他枠不可は自動割り振りでは守ります（手動なら一時許可で保存できます）\n' +
+	            '・「休日上限の緩和」の医師も、休日救急日中の月1回・同じ月の他枠不可は自動割り振りでは守ります\n' +
+	            '・自動割り振りはこれらの規則を守ります。手動では、規則に当たっても注意を確認してチェックを付ければ保存できます（同じ日に同じ先生は不可）\n' +
 	            '・個別設定で「当直休止」を付けた医師は、自動割り振りの対象から外します\n' +
 	            '・個別設定の「病棟夜間も可」は手動選択用です。自動割り振りでは使いません\n' +
 	            '・固定不可曜日は不可\n' +

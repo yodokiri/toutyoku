@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=20261107-members2">
+    <link rel="stylesheet" href="./styles.css?v=20261107-manual2">
     <!-- SheetJS-compatible library with style support for Excel export -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -166,21 +166,21 @@
                     <input type="checkbox" id="doctor-setting-paused">
                     <span class="setting-toggle-text">
                         <strong>当直休止</strong>
-                        <span>自動割り振りの対象から外します。手動の候補には「休止中」と表示され、選ぶと保存前に確認が出ます。</span>
+                        <span>自動割り振りの対象から外します。手動の候補には「休止中」と表示され、選ぶと注意が出ます（チェックを付ければ保存できます）。</span>
                     </span>
                 </label>
                 <label class="setting-toggle" for="doctor-setting-ward-night">
                     <input type="checkbox" id="doctor-setting-ward-night">
                     <span class="setting-toggle-text">
                         <strong>病棟夜間も可</strong>
-                        <span>病棟夜間の候補に表示し、手動で選べるようにします。自動割り振りには入りません。翌日が外来の夜は入れません。</span>
+                        <span>病棟夜間の候補に表示し、手動で選べるようにします。自動割り振りには入りません。翌日が外来の夜は注意が出ます。</span>
                     </span>
                 </label>
                 <label class="setting-toggle" for="doctor-setting-holiday-relaxed">
                     <input type="checkbox" id="doctor-setting-holiday-relaxed">
                     <span class="setting-toggle-text">
                         <strong>休日上限の緩和</strong>
-                        <span>土日祝の上限を月2回から月3回にします（自動割り振りにも適用）。手動では、休日救急日中の「月1回まで」「同じ月のほかの枠に入れない」に当たっても、確認のうえ保存できます。</span>
+                        <span>土日祝の上限を月2回から月3回にします（自動割り振りにも適用）。</span>
                     </span>
                 </label>
                 <p class="sync-help-text">共有保存を設定している場合は、保存すると共有データにも反映されます。</p>
@@ -239,12 +239,16 @@
                 </div>
             </div>
             <div class="modal-footer">
+                <label id="override-confirm" class="override-confirm hidden">
+                    <input type="checkbox" id="override-confirm-checkbox">
+                    <span>注意を確認したうえで保存する</span>
+                </label>
                 <button id="cancel-assignment" class="btn-secondary">キャンセル</button>
                 <button id="save-assignment" class="btn-primary">保存する</button>
             </div>
         </div>
     </div>
 
-    <script src="./app.js?v=20261107-holiday1"></script>
+    <script src="./app.js?v=20261107-manual2"></script>
 </body>
 </html>

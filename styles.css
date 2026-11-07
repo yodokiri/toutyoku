@@ -188,6 +188,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, .csv-label:focu
 
 .modal-warnings { background-color: var(--warning-light); color: #92400e; padding: 12px; border-radius: var(--radius-sm); font-size: 0.85rem; border: 1px solid #fcd34d; }
 .modal-error { background-color: #fef2f2; color: #b91c1c; padding: 12px; border-radius: var(--radius-sm); font-size: 0.85rem; border: 1px solid #fca5a5; }
+#modal-warnings { background: none; border: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+#assignment-modal .modal-footer { flex-wrap: wrap; }
+.override-confirm { flex: 1 1 100%; display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid #fcd34d; background-color: var(--warning-light); color: #92400e; font-size: 0.85rem; font-weight: 700; line-height: 1.5; cursor: pointer; }
+.override-confirm.is-strong { border-color: #fca5a5; background-color: #fef2f2; color: #b91c1c; }
+.override-confirm input[type="checkbox"] { width: 18px; height: 18px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--primary); }
 
 .form-group { display: flex; flex-direction: column; gap: 6px; }
 .form-group label { font-size: 0.85rem; font-weight: 600; }
@@ -673,6 +678,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   #disable-sync-settings { grid-column: 1 / -1; grid-row: 2; }
   .doctor-settings-btn { min-height: 44px; min-width: 52px; padding: 0 10px; font-size: 0.85rem; }
   .modal .setting-toggle input[type="checkbox"] { width: 22px; height: 22px; min-height: 0; padding: 0 !important; }
+  .modal .override-confirm input[type="checkbox"] { width: 22px; height: 22px; min-height: 0; padding: 0 !important; }
   #doctor-settings-modal .modal-footer button { flex: 1 1 0; }
 }
 
