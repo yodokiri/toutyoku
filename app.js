@@ -142,6 +142,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const HOLIDAY_DUTY_MONTHLY_LIMIT = 2;
     // 医師一覧の「個別設定」で「休日上限の緩和」を付けた医師の土日祝上限
     const RELAXED_HOLIDAY_DUTY_MONTHLY_LIMIT = 3;
+    // 土日祝の病棟（土曜の病棟・日祝の病棟日中/夜間）を、科の人数に応じた割合に近づける（2026-11-09 利用者「人数比」）。
+    // 自動割り振りで、点数の差がこの幅に収まる候補の中から、科の偏りが小さくなる先生を選ぶ。
+    // 幅の目安は年度内の土日祝の当直1〜2回分（1回 = 総回数25000 + 土日祝35000）。月の回数（1回 = 1000000）や
+    // 日曜病棟日中の女性医師優先（-180000）の差はこの幅を超えるので崩さない。
+    const HOLIDAY_WARD_DEPARTMENT_BALANCE_SCORE_BAND = 100000;
     const MONTHLY_DUTY_TARGET_BY_NAME = {
         '南部 海': 3
     };
@@ -3374,6 +3379,102 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ===== Auto Assign =====
+    // 土日祝の病棟（土曜の病棟・日祝の病棟日中/夜間。固定表の日を含む）。自動割り振りで科の偏りを減らす対象（2026-11-09）
+    function isHolidayWardSlot(dateObj, dateStr, role) {
+        return (role === 'wardDay' || role === 'wardNight') &&
+            (isHoliday(dateObj, dateStr) || isFixedSpecialDutyDate(dateStr));
+    }
+    function getHolidayWardDepartmentKey(doc) {
+        return getDoctorDepartment(doc) || `doctor:${doc.id}`;
+    }
+    // 自動割り振りでその枠に入りうるか（大まかな条件だけで、不可日・回数などの規則は見ない）。病棟夜間は補充候補（6-7年目）を除く。
+    function isRoughAutoAssignCandidate(doc, dateObj, dateStr, role) {
+        if (!isAutoAssignableDoctor(doc, dateObj) || doc.holidayErDayPreferred) return false;
+        if (!canAutoAssignFixedFemaleDoctor(doc, dateObj, role)) return false;
+        if (role === 'wardDay') return canDoWardDayDoctor(doc);
+        if (role === 'wardNight') return canDoWardNightDoctor(doc, dateObj, dateStr) && canDoWardNightPrimaryDoctor(doc, dateObj, dateStr);
+        if (role === 'erNight') return canDoErNightDoctor(doc);
+        return false;
+    }
+    // 救急日中を割り振った後に、その月の次の2つを数える。
+    // - pool: 固定表以外の土日祝の病棟に自動で入れる先生の数（科ごと = 科の人数）。当直休止・在籍外・救急日直希望の先生と、
+    //   その月に休日救急日中を担当する先生は数えない
+    // - holidayWardOnlyIds: 土日祝の病棟にしか入れない先生（平日の病棟夜間・救急夜間に入らない部長、日曜病棟日中のみの女性医師など）
+    function getHolidayWardDepartmentPlan(y, m, ld) {
+        const idsByDepartment = {};
+        const holidayWardIds = new Set();
+        const otherSlotIds = new Set();
+        for (let d = 1; d <= ld; d++) {
+            const dObj = new Date(y, m, d), dStr = formatDateStr(dObj);
+            getRequiredRoles(dObj, dStr).forEach(role => {
+                if (role === 'erDay' || isFixedSpecialDutyRole(dStr, role)) return;
+                const holidayWard = isHolidayWardSlot(dObj, dStr, role);
+                state.doctors.forEach(doc => {
+                    if (!isRoughAutoAssignCandidate(doc, dObj, dStr, role)) return;
+                    if (!holidayWard) {
+                        otherSlotIds.add(doc.id);
+                        return;
+                    }
+                    if (hasErDayThisMonth(doc.id)) return;
+                    holidayWardIds.add(doc.id);
+                    const key = getHolidayWardDepartmentKey(doc);
+                    if (!idsByDepartment[key]) idsByDepartment[key] = new Set();
+                    idsByDepartment[key].add(doc.id);
+                });
+            });
+        }
+        const pool = {};
+        Object.entries(idsByDepartment).forEach(([key, ids]) => { pool[key] = ids.size; });
+        const holidayWardOnlyIds = new Set([...holidayWardIds].filter(id => !otherSlotIds.has(id)));
+        return { pool, holidayWardOnlyIds };
+    }
+    // その月の土日祝の病棟の担当数を科ごとに数える（手で入れた分・固定表の分を含む）
+    function getHolidayWardDepartmentCounts(y, m, ld) {
+        const counts = {};
+        const addDoctor = doctorId => {
+            const doc = state.doctors.find(d => d.id === doctorId);
+            if (!doc) return;
+            const key = getHolidayWardDepartmentKey(doc);
+            counts[key] = (counts[key] || 0) + 1;
+        };
+        for (let d = 1; d <= ld; d++) {
+            const dObj = new Date(y, m, d), dStr = formatDateStr(dObj);
+            if (!isHoliday(dObj, dStr) && !isFixedSpecialDutyDate(dStr)) continue;
+            const dayShifts = state.shifts[dStr] || {};
+            ['wardDay', 'wardNight'].forEach(role => {
+                if (isFixedSpecialDutyRole(dStr, role)) getFixedDutyDoctorIds(dStr, role).forEach(addDoctor);
+                else if (dayShifts[role]) addDoctor(dayShifts[role]);
+            });
+        }
+        return counts;
+    }
+    // 点数順に並べた候補のうち、最良の点数との差が HOLIDAY_WARD_DEPARTMENT_BALANCE_SCORE_BAND 以内の先生から、次の順で選ぶ。
+    // 1. 土日祝の病棟にしか入れず、今月まだ0回の先生（月1回を優先するため）
+    // 2. 科の人数に対して今月の土日祝の病棟が少ない科の先生（(担当数 + 0.5) / 人数 が小さい科）
+    // 3. 点数の良い先生
+    function pickHolidayWardBalancedCandidate(sortedCandidates, plan, departmentCounts) {
+        const bestScore = sortedCandidates[0].score;
+        const getRank = doc => (plan.holidayWardOnlyIds.has(doc.id) && getDoctorMonthlyCount(doc.id) === 0) ? 0 : 1;
+        const getLoad = doc => {
+            const key = getHolidayWardDepartmentKey(doc);
+            return ((departmentCounts[key] || 0) + 0.5) / Math.max(1, plan.pool[key] || 0);
+        };
+        let chosen = sortedCandidates[0];
+        let chosenRank = getRank(chosen.doc);
+        let chosenLoad = getLoad(chosen.doc);
+        sortedCandidates.forEach(candidate => {
+            if (candidate.score > bestScore + HOLIDAY_WARD_DEPARTMENT_BALANCE_SCORE_BAND) return;
+            const rank = getRank(candidate.doc);
+            const load = getLoad(candidate.doc);
+            if (rank < chosenRank || (rank === chosenRank && load < chosenLoad - 1e-9)) {
+                chosen = candidate;
+                chosenRank = rank;
+                chosenLoad = load;
+            }
+        });
+        return chosen.doc;
+    }
+
     function scoreDoctorForAutoAssign(doc, dateStr, role) {
         const count = getDoctorMonthlyCount(doc.id);
         const dateObj = new Date(dateStr);
@@ -3612,6 +3713,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            '・連続当直 / 同一週2回は禁止\n' +
 	            '・前月最終週と翌月第一週の休日を同じ医師が連続して担当するのは禁止\n' +
 	            '・同じ日は、可能な限り異なる科の医師を割り当てます\n' +
+	            '・土日祝の病棟（土曜の病棟・日祝の病棟日中/夜間）は平日より先に割り振り、科の人数に応じた割合に近づくよう、偏っている科の先生を後回しにします（土日祝の病棟にしか入れない先生の月1回目を先に確保します）\n' +
 	            '・月4回以上は不可（最大3回まで）\n' +
 	            `・土日祝は月${HOLIDAY_DUTY_MONTHLY_LIMIT}回まで（個別設定で「休日上限の緩和」を付けた医師は月${RELAXED_HOLIDAY_DUTY_MONTHLY_LIMIT}回まで）\n` +
 	            '・「休日上限の緩和」の医師も、休日救急日中の月1回・同じ月の他枠不可は自動割り振りでは守ります\n' +
@@ -3659,61 +3761,71 @@ document.addEventListener('DOMContentLoaded', () => {
         skipped += erDayDates.filter(({ dStr }) => !(state.shifts[dStr] && state.shifts[dStr].erDay)).length;
 
         // === Pass 2: Assign wardDay, wardNight, erNight ===
-        for (let d = 1; d <= ld; d++) {
-            const dObj = new Date(y, m, d), dStr = formatDateStr(dObj);
-            const roles = getRequiredRoles(dObj, dStr).filter(r => r !== 'erDay');
-            if (!state.shifts[dStr]) state.shifts[dStr] = {};
-            const assignedToday = new Set(getAssignedDoctorIdsForDate(dStr));
+        // 先に土日祝の病棟を日付順に、次に残りの枠（平日の病棟夜間・救急夜間）を日付順に割り振る（2026-11-09）。
+        // 土日祝の病棟は科の人数に応じた割合に近づける。平日を先に割り振ると、人数の少ない科の先生が平日で月1回目を使い、
+        // 土日祝に回せる先生が残らないため。
+        const holidayWardPlan = getHolidayWardDepartmentPlan(y, m, ld);
+        for (const holidayWardPhase of [true, false]) {
+            for (let d = 1; d <= ld; d++) {
+                const dObj = new Date(y, m, d), dStr = formatDateStr(dObj);
+                const roles = getRequiredRoles(dObj, dStr)
+                    .filter(r => r !== 'erDay' && isHolidayWardSlot(dObj, dStr, r) === holidayWardPhase);
+                if (!state.shifts[dStr]) state.shifts[dStr] = {};
+                if (roles.length === 0) continue;
+                const assignedToday = new Set(getAssignedDoctorIdsForDate(dStr));
 
-            for (const role of roles) {
-                if (isFixedSpecialDutyRole(dStr, role)) continue;
-                if (state.shifts[dStr][role]) continue;
+                for (const role of roles) {
+                    if (isFixedSpecialDutyRole(dStr, role)) continue;
+                    if (state.shifts[dStr][role]) continue;
 
-	                let candidates = state.doctors.filter(doc => {
-	                    if (!isAutoAssignableDoctor(doc, dObj)) return false;
-	                    if (doc.holidayErDayPreferred) return false;
-	                    if (role === 'wardDay' && !canDoWardDayDoctor(doc)) return false;
-                    if (role === 'wardNight' && !canDoWardNightDoctor(doc, dObj, dStr)) return false;
-                    if (role === 'erNight' && !canDoErNightDoctor(doc)) return false;
-                    if (hasErDayThisMonth(doc.id)) return false;
-                    if (assignedToday.has(doc.id)) return false;
-                    const chk = checkAssignmentRule(doc.id, role, dObj);
-                    return chk.valid;
-                });
+                    let candidates = state.doctors.filter(doc => {
+                        if (!isAutoAssignableDoctor(doc, dObj)) return false;
+                        if (doc.holidayErDayPreferred) return false;
+                        if (role === 'wardDay' && !canDoWardDayDoctor(doc)) return false;
+                        if (role === 'wardNight' && !canDoWardNightDoctor(doc, dObj, dStr)) return false;
+                        if (role === 'erNight' && !canDoErNightDoctor(doc)) return false;
+                        if (hasErDayThisMonth(doc.id)) return false;
+                        if (assignedToday.has(doc.id)) return false;
+                        const chk = checkAssignmentRule(doc.id, role, dObj);
+                        return chk.valid;
+                    });
 
-                if (role === 'wardNight') {
-                    const primaryWardCandidates = candidates.filter(doc =>
-                        canDoWardNightPrimaryDoctor(doc, dObj, dStr)
-                    );
-                    if (primaryWardCandidates.length > 0) {
-                        candidates = primaryWardCandidates;
+                    if (role === 'wardNight') {
+                        const primaryWardCandidates = candidates.filter(doc =>
+                            canDoWardNightPrimaryDoctor(doc, dObj, dStr)
+                        );
+                        if (primaryWardCandidates.length > 0) {
+                            candidates = primaryWardCandidates;
+                        }
                     }
+
+                    const fixedFemalePreferredCandidates = candidates.filter(doc =>
+                        canAutoAssignFixedFemaleDoctor(doc, dObj, role)
+                    );
+                    const nonResponderCandidates = candidates.filter(doc =>
+                        needsFormNonResponderDuty(doc)
+                    );
+                    if (nonResponderCandidates.length > 0) {
+                        candidates = nonResponderCandidates;
+                    } else if (fixedFemalePreferredCandidates.length > 0) {
+                        candidates = fixedFemalePreferredCandidates;
+                    }
+
+                    candidates = preferDifferentDepartmentCandidates(candidates, dStr, role);
+
+                    if (candidates.length === 0) { skipped++; continue; }
+
+                    candidates = candidates.map(doc => {
+                        return { doc, score: scoreDoctorForAutoAssign(doc, dStr, role) };
+                    }).sort((a, b) => a.score - b.score);
+
+                    const chosen = holidayWardPhase
+                        ? pickHolidayWardBalancedCandidate(candidates, holidayWardPlan, getHolidayWardDepartmentCounts(y, m, ld))
+                        : candidates[0].doc;
+                    state.shifts[dStr][role] = chosen.id;
+                    assignedToday.add(chosen.id);
+                    made++;
                 }
-
-                const fixedFemalePreferredCandidates = candidates.filter(doc =>
-                    canAutoAssignFixedFemaleDoctor(doc, dObj, role)
-                );
-                const nonResponderCandidates = candidates.filter(doc =>
-                    needsFormNonResponderDuty(doc)
-                );
-                if (nonResponderCandidates.length > 0) {
-                    candidates = nonResponderCandidates;
-                } else if (fixedFemalePreferredCandidates.length > 0) {
-                    candidates = fixedFemalePreferredCandidates;
-                }
-
-                candidates = preferDifferentDepartmentCandidates(candidates, dStr, role);
-
-                if (candidates.length === 0) { skipped++; continue; }
-
-                candidates = candidates.map(doc => {
-                    return { doc, score: scoreDoctorForAutoAssign(doc, dStr, role) };
-                }).sort((a, b) => a.score - b.score);
-
-                const chosen = candidates[0].doc;
-                state.shifts[dStr][role] = chosen.id;
-                assignedToday.add(chosen.id);
-                made++;
             }
         }
 
