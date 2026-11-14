@@ -1137,6 +1137,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // フォーム回答の自動取り込み（2026-11-14）。この端末の画面の間だけの状態で、保存しない
         formImport: {
             available: false,
+            // Apps Script側の一覧に登録されている月（load の応答の formImport.months）。無い版の Apps Script では null
+            months: null,
             generation: 0,
             byMonth: {},
             diagnostics: {}
@@ -1328,7 +1330,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return url.toString();
     }
 
+    // 共有保存の読み出し（JSONP）。まず、Googleのログイン情報（Cookie）を付けずに読む。
+    // 個人のGoogleアカウントにログインしたふだんのブラウザで、院内アカウントの公開をログイン情報付きで読むと、
+    // 「共有保存に接続できませんでした」になる（ログイン情報なしなら読める。2026-11-15）。
+    // ログイン情報なしで読めなかったときだけ、これまでの読み方で1回読み直す（古い公開を使う端末の動きを変えないため）
     function requestSharedJsonp(params, timeoutMs = 15000) {
+        return requestSharedJsonpOnce(params, timeoutMs, true).catch(err => {
+            if (err && err.sharedConnectFailed) return requestSharedJsonpOnce(params, timeoutMs, false);
+            throw err;
+        });
+    }
+
+    function requestSharedJsonpOnce(params, timeoutMs, withoutLogin) {
         return new Promise((resolve, reject) => {
             if (!isSharedSyncEnabled()) {
                 reject(new Error('共有保存が設定されていません。'));
@@ -1336,6 +1349,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const callbackName = `__dutySync_${Date.now()}_${Math.random().toString(36).slice(2)}`;
             const script = document.createElement('script');
+            // crossOrigin = 'anonymous' でログイン情報を付けない。応答に Access-Control-Allow-Origin が要る
+            // （Apps Scriptの応答は、転送の前後とも * を返す。2026-11-15確認）
+            if (withoutLogin) script.crossOrigin = 'anonymous';
             let timer = null;
             const cleanup = () => {
                 if (timer) clearTimeout(timer);
@@ -1349,7 +1365,9 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             script.onerror = () => {
                 cleanup();
-                reject(new Error('共有保存に接続できませんでした。'));
+                const error = new Error('共有保存に接続できませんでした。');
+                error.sharedConnectFailed = true;
+                reject(error);
             };
             timer = setTimeout(() => {
                 cleanup();
@@ -1501,6 +1519,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Apps Script側がフォーム回答の読み出しに対応しているときだけ、自動取り込みを動かす。
             // 対応前のApps Scriptに知らない読み出しを送ると、エラーが共有保存側に記録されるため（2026-11-14）
             syncState.formImport.available = !!(result && result.formImport && result.formImport.enabled === true);
+            syncState.formImport.months = result && result.formImport && Array.isArray(result.formImport.months)
+                ? result.formImport.months.map(String)
+                : null;
             if (result.empty) {
                 syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
                 saveRemoteMeta();
@@ -1589,6 +1610,7 @@ document.addEventListener('DOMContentLoaded', () => {
         syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
         syncState.unsharedLocalChanges = false;
         syncState.formImport.available = false;
+        syncState.formImport.months = null;
         syncState.formImport.generation++;
         syncState.formImport.byMonth = {};
         writeStoredJson(STORAGE_KEYS.syncConfig, syncState.config);
@@ -2510,6 +2532,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function getFormAutoImportMonths() {
         const today = new Date();
         const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        // フォームは2〜3か月前に集めるので、Apps Script側が一覧の月を返すときは、その月（今月以降、6か月分まで）を読む
+        if (Array.isArray(syncState.formImport.months)) {
+            const thisMonthKey = getMonthKey(thisMonth);
+            return [...new Set(syncState.formImport.months)]
+                .filter(monthKey => /^\d{4}-\d{2}$/.test(monthKey) && monthKey >= thisMonthKey)
+                .sort()
+                .slice(0, 6);
+        }
         const shownMonth = new Date(state.currentDate.getFullYear(), state.currentDate.getMonth(), 1);
         const candidates = [
             thisMonth,
