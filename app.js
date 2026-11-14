@@ -299,6 +299,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Utilities =====
     function normalizeName(n) { return (n || '').trim().replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim(); }
     function normalizeDoctorMatchName(n) { return normalizeName(n).replace(/\s+/g, ''); }
+    // フォームの文字（備考など）をHTMLとして画面に入れるときは必ずこれを通す（2026-11-14）
+    function escapeHtml(value) {
+        return String(value === null || value === undefined ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
     function getDepartmentByName(name) { return DEPARTMENT_BY_NAME[normalizeName(name)] || ''; }
     function parseDateStr(dateStr) {
@@ -708,6 +717,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(value).replace(/^"|"$/g, '').trim();
     }
 
+    // 2026年10月用からのフォームは見出しが「当直希望日①」「当直不可日①」になったため、先頭の「当直」を外して
+    // 「希望日1」「不可日1」として読む（2026-11-14。外さないと第1希望日・第1不可日を黙って読み飛ばしていた）
     function normalizeImportHeader(value) {
         return cleanImportCell(value)
             .replace(/^\uFEFF/, '')
@@ -715,8 +726,12 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/[①１]/g, '1')
             .replace(/[②２]/g, '2')
             .replace(/[③３]/g, '3')
-            .replace(/任意/g, '');
+            .replace(/任意/g, '')
+            .replace(/^当直/, '');
     }
+
+    // 取り込みに使わないと分かっている見出し（正規化後）。希望日③は使うか未決定で、今は読まない
+    const KNOWN_UNUSED_FORM_HEADERS = new Set(['希望日3']);
 
     function findImportColumn(headers, aliases) {
         const normalizedHeaders = headers.map(normalizeImportHeader);
@@ -726,18 +741,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }, -1);
     }
 
-    function parseImportDateList(value, refYear, refMonth) {
+    function isRealDateStr(dateStr) {
+        const dateObj = parseDateStr(dateStr);
+        return !!dateObj && formatDateStr(dateObj) === dateStr;
+    }
+
+    // dates は従来の parseImportDateList と同じ結果。invalid は読めなかった語（実在しない日付を含む）で、結果表示に使う
+    function parseImportDateListDetailed(value, refYear, refMonth) {
         const text = cleanImportCell(value);
-        if (!text) return [];
-        return text
-            .split(/[,、\s]+/)
-            .map(s => parseFlexibleDate(s.trim(), refYear, refMonth))
-            .filter(Boolean);
+        const dates = [];
+        const invalid = [];
+        if (!text) return { dates, invalid };
+        text.split(/[,、\s]+/).forEach(token => {
+            const trimmed = token.trim();
+            if (!trimmed) return;
+            const parsed = parseFlexibleDate(trimmed, refYear, refMonth);
+            if (parsed) dates.push(parsed);
+            if (!parsed || !isRealDateStr(parsed)) invalid.push(trimmed);
+        });
+        return { dates, invalid };
+    }
+
+    function parseImportDateList(value, refYear, refMonth) {
+        return parseImportDateListDetailed(value, refYear, refMonth).dates;
+    }
+
+    const FORM_DATE_FIELDS = [
+        { key: 'preferred1', label: '希望日1' },
+        { key: 'preferred2', label: '希望日2' },
+        { key: 'ng1', label: '不可日1' },
+        { key: 'ng2', label: '不可日2' },
+        { key: 'ng3', label: '不可日3' }
+    ];
+
+    function hasFormDateColumns(columns) {
+        return !!columns && FORM_DATE_FIELDS.some(field => columns[field.key] >= 0);
     }
 
     function buildFormRowsFromAoA(rows) {
-        const nonEmptyRows = rows.filter(row => row.some(cell => cleanImportCell(cell)));
-        if (nonEmptyRows.length === 0) return [];
+        return readFormSheet(rows).rows;
+    }
+
+    // 見出し行を探して、列の位置（columns）と回答の行（rows）を返す。空のシートは columns: null
+    function readFormSheet(rows) {
+        const nonEmptyRows = rows.filter(row => Array.isArray(row) && row.some(cell => cleanImportCell(cell)));
+        if (nonEmptyRows.length === 0) return { rows: [], columns: null, unusedColumns: [] };
         const headerRowIndex = nonEmptyRows.findIndex(row => {
             const headers = row.map(normalizeImportHeader);
             const hasName = headers.includes('医師名') || headers.includes('名前');
@@ -760,7 +808,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (columns.name < 0) {
             throw new Error('医師名または名前の列が見つかりません。');
         }
-        return nonEmptyRows.slice(headerRowIndex + 1).map(row => ({
+        const formRows = nonEmptyRows.slice(headerRowIndex + 1).map(row => ({
             name: cleanImportCell(row[columns.name]),
             preferred1: columns.preferred1 >= 0 ? row[columns.preferred1] : '',
             preferred2: columns.preferred2 >= 0 ? row[columns.preferred2] : '',
@@ -769,6 +817,17 @@ document.addEventListener('DOMContentLoaded', () => {
             ng3: columns.ng3 >= 0 ? row[columns.ng3] : '',
             notes: columns.notes >= 0 ? cleanImportCell(row[columns.notes]) : ''
         })).filter(row => row.name);
+        // 「希望日」「不可日」を含むのに、どの列にも当たらなかった見出し（見出しの書き方が変わったときに気づくため）
+        const mappedIndexes = new Set(Object.values(columns).filter(index => index >= 0));
+        const unusedColumns = headers
+            .map((header, index) => ({ header, index }))
+            .filter(({ header, index }) => {
+                if (mappedIndexes.has(index)) return false;
+                const normalized = normalizeImportHeader(header);
+                return /希望日|不可日/.test(normalized) && !KNOWN_UNUSED_FORM_HEADERS.has(normalized);
+            })
+            .map(({ header }) => cleanImportCell(header).replace(/\s+/g, ' '));
+        return { rows: formRows, columns, unusedColumns };
     }
 
     function readCsvRows(text) {
@@ -1070,7 +1129,18 @@ document.addEventListener('DOMContentLoaded', () => {
         saveInFlight: false,
         saveQueued: false,
         queuedReason: '',
-        lastConflictRevision: ''
+        lastConflictRevision: '',
+        // saveLocalData のたびに増える。共有保存の時点から変更がないかを見る
+        localEditSeq: 0,
+        // 自動割り振り（saveLocalOnlyData）や戻した医師など、まだ共有していない変更があるか
+        unsharedLocalChanges: false,
+        // フォーム回答の自動取り込み（2026-11-14）。この端末の画面の間だけの状態で、保存しない
+        formImport: {
+            available: false,
+            generation: 0,
+            byMonth: {},
+            diagnostics: {}
+        }
     };
     localStorage.setItem(STORAGE_KEYS.syncClientId, syncState.clientId);
 
@@ -1129,6 +1199,10 @@ document.addEventListener('DOMContentLoaded', () => {
         addNgBtn: document.getElementById('add-ng-btn'),
 	        pendingNgList: document.getElementById('pending-ng-list'),
 	        formCsvUpload: document.getElementById('form-csv-upload'),
+        formImportPanel: document.getElementById('form-import-panel'),
+        formImportSummary: document.getElementById('form-import-summary'),
+        formImportBody: document.getElementById('form-import-body'),
+        formImportAutoStatus: document.getElementById('form-import-auto-status'),
         clearCurrentMonthBtn: document.getElementById('clear-current-month-btn'),
 	        clearAllBtn: document.getElementById('clear-all-data-btn'),
 	        modal: document.getElementById('assignment-modal'),
@@ -1180,6 +1254,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function saveLocalData() {
+        syncState.localEditSeq++;
         writeStoredJson(STORAGE_KEYS.doctors, state.doctors);
         writeStoredJson(STORAGE_KEYS.shifts, state.shifts);
         writeStoredJson(STORAGE_KEYS.specialDayRules, state.specialDayRules);
@@ -1307,35 +1382,43 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function handleSharedConflict(meta) {
+    function handleSharedConflict(meta, options = {}) {
         const revision = String((meta && meta.revision) || '');
-        const previousConflictRevision = syncState.lastConflictRevision;
-        syncState.lastConflictRevision = revision || syncState.lastConflictRevision;
         const updated = formatSyncTime(meta && meta.updatedAt);
         const by = (meta && meta.updatedBy) || '他の利用者';
         updateSyncStatus('conflict', '', `先に共有更新があります: ${updated} / ${by}`);
+        // 自動取り込みの重なり（quiet）は警告を出さない。同じ版の警告を繰り返さないための記録にも残さない
+        // （残すと、その後に手で「共有保存」を押したときの警告が出なくなるため。2026-11-14）
+        if (options.quiet) return;
+        const previousConflictRevision = syncState.lastConflictRevision;
+        syncState.lastConflictRevision = revision || syncState.lastConflictRevision;
         if (revision && previousConflictRevision === revision) return;
         alert(`他の利用者が先に共有保存しました。\n\n共有保存は中断しました。必要に応じて「共有読込」で最新状態を確認してください。\n最終更新: ${updated || '不明'} / ${by}`);
     }
 
-    async function saveSharedData(reason) {
-        if (!isSharedSyncEnabled()) return;
+    // 戻り値: 'disabled' | 'queued' | 'conflict' | 'saved' | 'error'（既存の呼び出し元は戻り値を使わない）
+    // options.quietConflict: 競合しても alert を出さない（フォーム回答の自動取り込みで使う）
+    async function saveSharedData(reason, options = {}) {
+        if (!isSharedSyncEnabled()) return 'disabled';
         if (syncState.saveInFlight) {
             syncState.saveQueued = true;
             syncState.queuedReason = reason || syncState.queuedReason || '変更';
-            return;
+            return 'queued';
         }
         syncState.saveInFlight = true;
         updateSyncStatus('syncing');
+        let outcome = 'error';
         try {
             const meta = await requestSharedJsonp({ action: 'meta' });
             const remoteRevision = meta.empty ? '' : String(meta.revision || '');
             const localRevision = String((syncState.remoteMeta && syncState.remoteMeta.revision) || '');
             if (remoteRevision && remoteRevision !== localRevision) {
-                handleSharedConflict(meta);
-                return;
+                handleSharedConflict(meta, { quiet: !!options.quietConflict });
+                outcome = 'conflict';
+                return outcome;
             }
 
+            const editSeqAtPost = syncState.localEditSeq;
             await postSharedSnapshot(reason, remoteRevision);
             await new Promise(resolve => setTimeout(resolve, 1200));
 
@@ -1350,14 +1433,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 saveRemoteMeta();
                 renderSyncStatusFromMeta();
+                if (syncState.localEditSeq === editSeqAtPost) syncState.unsharedLocalChanges = false;
+                outcome = 'saved';
             } else if (!nextMeta.empty && newRevisionNumber > oldRevisionNumber) {
-                handleSharedConflict(nextMeta);
+                handleSharedConflict(nextMeta, { quiet: !!options.quietConflict });
+                outcome = 'conflict';
             } else {
                 throw new Error(nextMeta.lastError || '共有保存の完了確認ができませんでした。');
             }
         } catch (err) {
             console.warn('Shared save error', err);
             updateSyncStatus('error', '', err && err.message ? err.message : '共有保存でエラーが発生しました。');
+            outcome = 'error';
         } finally {
             syncState.saveInFlight = false;
             if (syncState.saveQueued) {
@@ -1367,6 +1454,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 scheduleSharedSave(queuedReason);
             }
         }
+        return outcome;
     }
 
     function scheduleSharedSave(reason) {
@@ -1387,6 +1475,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function saveLocalOnlyData(reason = '変更') {
         saveLocalData();
         if (isSharedSyncEnabled()) {
+            syncState.unsharedLocalChanges = true;
             updateSyncStatus('local-changed', '未共有変更あり', `${reason} はこの端末に保存済みです。共有するには「共有保存」を押してください。`);
         }
     }
@@ -1409,6 +1498,9 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSyncStatus('syncing');
         try {
             const result = await requestSharedJsonp({ action: 'load' });
+            // Apps Script側がフォーム回答の読み出しに対応しているときだけ、自動取り込みを動かす。
+            // 対応前のApps Scriptに知らない読み出しを送ると、エラーが共有保存側に記録されるため（2026-11-14）
+            syncState.formImport.available = !!(result && result.formImport && result.formImport.enabled === true);
             if (result.empty) {
                 syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
                 saveRemoteMeta();
@@ -1425,6 +1517,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 updatedBy: result.updatedBy || ''
             };
             syncState.lastConflictRevision = '';
+            syncState.unsharedLocalChanges = addedRequiredDoctors.length > 0;
+            syncState.formImport.generation++;
             saveRemoteMeta();
             saveLocalData();
             renderDoctors();
@@ -1433,6 +1527,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (addedRequiredDoctors.length > 0) {
                 updateSyncStatus('local-changed', '未共有変更あり', `一覧に戻した医師があります（${addedRequiredDoctors.join('、')}）。この端末に保存済みです。共有するには「共有保存」を押してください。`);
             }
+            startFormAutoImport({ attempt: options.formImportAttempt || 0 });
             if (!options.silent) alert('共有保存から最新データを読み込みました。');
             return true;
         } catch (err) {
@@ -1492,10 +1587,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirm('共有保存を無効化しますか？\nこの端末のローカル保存データは残ります。')) return;
         syncState.config = normalizeSyncConfig({});
         syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
+        syncState.unsharedLocalChanges = false;
+        syncState.formImport.available = false;
+        syncState.formImport.generation++;
+        syncState.formImport.byMonth = {};
         writeStoredJson(STORAGE_KEYS.syncConfig, syncState.config);
         saveRemoteMeta();
         closeSyncSettings();
         updateSyncStatus('local');
+        renderFormImportPanel();
     }
 
     els.syncSettingsBtn.addEventListener('click', openSyncSettings);
@@ -2243,8 +2343,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 医師一覧からの削除（×）は2026-11-07に廃止した。削除すると全期間の割り当てが消えるため。
     // 退職などで外す医師は DEFAULT_DOCTORS の availableUntil（在籍終了日）で外し、休職などは個別設定の「当直休止」を使う。
 
-    function applyFormResponseRows(rows) {
-        const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth() + 1;
+    // フォーム回答の1か月分を作る（state は変えない）。y・m は取り込む月（m は1〜12）。
+    // 表示中の月に依存しないので、自動取り込みでは表示中以外の月にも使う（2026-11-14）
+    function buildFormMonthData(rows, y, m) {
+        const monthDate = new Date(y, m - 1, 1);
+        const monthKey = getMonthKey(monthDate);
         const latestByName = new Map();
         const responseCounts = new Map();
         const notFound = [];
@@ -2265,19 +2368,28 @@ document.addEventListener('DOMContentLoaded', () => {
             latestByName.set(normalizedN, { doc, row });
         });
 
-        const monthKey = getCurrentMonthKey();
         const responses = {};
+        const invalidDates = [];
+        const dateStats = { total: 0, inMonth: 0 };
         latestByName.forEach(({ doc, row }, normalizedName) => {
-            const preferredDates1 = parseImportDateList(row.preferred1, y, m);
-            const preferredDates2 = parseImportDateList(row.preferred2, y, m);
+            const parsed = {};
+            FORM_DATE_FIELDS.forEach(field => {
+                const detail = parseImportDateListDetailed(row[field.key], y, m);
+                parsed[field.key] = detail.dates;
+                detail.invalid.forEach(value => invalidDates.push({ name: doc.name, field: field.label, value }));
+                detail.dates.forEach(dateStr => {
+                    dateStats.total++;
+                    if (dateStr.startsWith(`${monthKey}-`)) dateStats.inMonth++;
+                });
+            });
             responses[normalizedName] = {
                 doctorName: doc.name,
-                preferredDates1,
-                preferredDates2,
-                preferredDates: [...new Set([...preferredDates1, ...preferredDates2])],
-                ngDates1: parseImportDateList(row.ng1, y, m),
-                ngDates2: parseImportDateList(row.ng2, y, m),
-                ngDates3: parseImportDateList(row.ng3, y, m),
+                preferredDates1: parsed.preferred1,
+                preferredDates2: parsed.preferred2,
+                preferredDates: [...new Set([...parsed.preferred1, ...parsed.preferred2])],
+                ngDates1: parsed.ng1,
+                ngDates2: parsed.ng2,
+                ngDates3: parsed.ng3,
                 notes: cleanImportCell(row.notes)
             };
         });
@@ -2288,33 +2400,58 @@ document.addEventListener('DOMContentLoaded', () => {
         const responders = [...latestByName.values()].map(({ doc }) => doc.name);
         const responderSet = new Set(responders.map(normalizeDoctorMatchName));
         const missingDoctors = state.doctors.filter(doc =>
-            isDoctorActiveInMonth(doc) &&
+            isDoctorActiveInMonth(doc, monthDate) &&
             !isDutyExcludedDoctor(doc) &&
             !isManualOnlyDoctor(doc) &&
             !isDutyPausedDoctor(doc) &&
             !responderSet.has(normalizeDoctorMatchName(doc.name))
         );
-        state.formResponsesByMonth[monthKey] = {
-            importedAt: new Date().toISOString(),
-            responders,
-            duplicateNames,
-            notFound,
-            responses
-        };
-        state.formResponseStatus[monthKey] = {
-            importedAt: state.formResponsesByMonth[monthKey].importedAt,
-            responders,
-            duplicateNames,
-            notFound
-        };
-
         return {
             monthKey,
+            data: {
+                importedAt: new Date().toISOString(),
+                responders,
+                duplicateNames,
+                notFound,
+                responses
+            },
             updated: latestByName.size,
             duplicateNames,
             notFound,
-            missingDoctors
+            missingDoctors,
+            invalidDates,
+            dateStats
         };
+    }
+
+    function storeFormMonthData(monthKey, data) {
+        state.formResponsesByMonth[monthKey] = data;
+        state.formResponseStatus[monthKey] = {
+            importedAt: data.importedAt,
+            responders: data.responders,
+            duplicateNames: data.duplicateNames,
+            notFound: data.notFound
+        };
+    }
+
+    // ファイルからの取り込み。表示中の月へ入れる（従来どおり）
+    function applyFormResponseRows(rows) {
+        const y = state.currentDate.getFullYear(), m = state.currentDate.getMonth() + 1;
+        const built = buildFormMonthData(rows, y, m);
+        storeFormMonthData(built.monthKey, built.data);
+        syncState.formImport.diagnostics[built.monthKey] = { via: 'file', at: Date.now(), invalidDates: built.invalidDates };
+        return {
+            monthKey: built.monthKey,
+            updated: built.updated,
+            duplicateNames: built.duplicateNames,
+            notFound: built.notFound,
+            missingDoctors: built.missingDoctors,
+            invalidDates: built.invalidDates
+        };
+    }
+
+    function formatInvalidDateItem(item) {
+        return `${item.name} ${item.field}「${item.value}」`;
     }
 
     function showFormImportResult(result) {
@@ -2332,20 +2469,354 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result.notFound.length > 0) {
             msg += `\n\n⚠️ 以下の医師名は一致しませんでした:\n${result.notFound.join('\n')}`;
         }
+        if (result.unusedColumns && result.unusedColumns.length > 0) {
+            msg += `\n\n⚠️ 見出しが読めず、取り込んでいない列があります（その列の回答は反映されません）:\n${result.unusedColumns.join('\n')}`;
+        }
+        if (result.invalidDates && result.invalidDates.length > 0) {
+            const shown = result.invalidDates.slice(0, 10).map(formatInvalidDateItem);
+            const more = result.invalidDates.length > shown.length ? `\nほか${result.invalidDates.length - shown.length}件` : '';
+            msg += `\n\n⚠️ 読めなかった日付: ${result.invalidDates.length}件（反映されません）\n${shown.join('\n')}${more}`;
+        }
         alert(msg);
+    }
+
+    // 自動取り込みで「変わったか」を見るための比較用の文字列。取り込み日時（importedAt）は含めない。
+    // 並び順の違いだけでは変わったことにしない。新しく足した項目ではなく、従来からある項目だけで比べる
+    function getFormMonthSignature(monthData) {
+        if (!monthData) return '';
+        const sortedList = list => (Array.isArray(list) ? list.map(value => String(value)) : []).sort();
+        const responses = monthData.responses || {};
+        const normalizedResponses = {};
+        Object.keys(responses).sort().forEach(key => {
+            normalizedResponses[key] = migrateFormResponseRecord(responses[key]);
+        });
+        return JSON.stringify({
+            responders: sortedList(monthData.responders),
+            duplicateNames: sortedList(monthData.duplicateNames),
+            notFound: sortedList(monthData.notFound),
+            responses: normalizedResponses
+        });
+    }
+
+    // ===== Form Import: 自動取り込み（2026-11-14） =====
+    // 共有読込に成功した後、Apps Script側が対応していれば（load の応答に formImport.enabled: true）、
+    // 今月・来月と、表示中の月・その翌月（今月より前の月は除く）の回答を月ごとに読み、内容が変わった月だけ取り込む。
+    // Google側の一覧に登録された月は、シートの内容を正とする（手動のファイル取り込みも、次の共有読込でシートの内容に戻る）。
+    // 空のシート・見出しが読めない・回答0名・日付の月が違う・読み出し失敗のときは、取り込み済みの回答を変えない。
+    // まだ共有していない変更（自動割り振りなど）があるときは、この端末にだけ取り込み、共有保存しない。
+    const FORM_AUTO_IMPORT_REASON = 'フォーム回答自動取込';
+    const FORM_AUTO_IMPORT_TIMEOUT_MS = 20000;
+
+    function getFormAutoImportMonths() {
+        const today = new Date();
+        const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        const shownMonth = new Date(state.currentDate.getFullYear(), state.currentDate.getMonth(), 1);
+        const candidates = [
+            thisMonth,
+            new Date(thisMonth.getFullYear(), thisMonth.getMonth() + 1, 1),
+            shownMonth,
+            new Date(shownMonth.getFullYear(), shownMonth.getMonth() + 1, 1)
+        ];
+        const seen = new Set();
+        return candidates
+            .filter(monthDate => monthDate >= thisMonth)
+            .map(getMonthKey)
+            .filter(monthKey => {
+                if (seen.has(monthKey)) return false;
+                seen.add(monthKey);
+                return true;
+            })
+            .sort();
+    }
+
+    // 読み出した1か月分の応答を調べる。state は変えない。取り込むときだけ data を返す
+    function evaluateFormAutoImport(item) {
+        const monthKey = item.monthKey;
+        const [y, m] = monthKey.split('-').map(Number);
+        const at = Date.now();
+        if (item.error) {
+            const reason = item.error && item.error.message ? item.error.message : String(item.error);
+            return { status: { kind: 'error', at, message: `回答を読み出せませんでした（${reason}）` } };
+        }
+        const payload = item.payload;
+        if (!payload || payload.month !== monthKey) {
+            return { status: { kind: 'error', at, message: '読み出した回答の月が一致しませんでした' } };
+        }
+        if (payload.found !== true) {
+            return { status: { kind: 'none', at, found: false } };
+        }
+        if (!Array.isArray(payload.values)) {
+            return { status: { kind: 'error', at, found: true, message: '回答シートの形式が読めませんでした' } };
+        }
+        const existing = state.formResponsesByMonth && state.formResponsesByMonth[monthKey];
+        const existingResponders = existing && Array.isArray(existing.responders) ? existing.responders : [];
+        let sheet;
+        try {
+            sheet = readFormSheet(payload.values);
+        } catch (err) {
+            return { status: { kind: 'error', at, found: true, message: err && err.message ? err.message : String(err) } };
+        }
+        if (!sheet.columns) {
+            return { status: { kind: 'empty', at, found: true, keptExisting: existingResponders.length > 0, notFound: [], invalidDates: [] } };
+        }
+        if (!hasFormDateColumns(sheet.columns)) {
+            return { status: { kind: 'error', at, found: true, message: '回答シートに希望日・不可日の列が見つかりませんでした' } };
+        }
+        if (sheet.unusedColumns.length > 0) {
+            // 一部の日付の列だけ読めないまま取り込むと、その列の回答が黙って消えるので取り込まない
+            return { status: { kind: 'error', at, found: true, unusedColumns: sheet.unusedColumns, message: `読めない見出しの列があるため取り込みませんでした（${sheet.unusedColumns.join('、')}）` } };
+        }
+        const built = buildFormMonthData(sheet.rows, y, m);
+        const diagnostics = { notFound: built.notFound, invalidDates: built.invalidDates };
+        if (built.data.responders.length === 0) {
+            return { status: { kind: 'empty', at, found: true, keptExisting: existingResponders.length > 0, ...diagnostics } };
+        }
+        if (built.dateStats.total >= 3 && built.dateStats.inMonth * 2 < built.dateStats.total) {
+            return { status: { kind: 'error', at, found: true, message: `回答の日付の多くが${m}月ではありません。Google側の一覧の月とシートを確認してください` } };
+        }
+        if (existing && getFormMonthSignature(existing) === getFormMonthSignature(built.data)) {
+            return { status: { kind: 'unchanged', at, found: true, responders: built.data.responders.length, ...diagnostics } };
+        }
+        const afterSet = new Set(built.data.responders.map(normalizeDoctorMatchName));
+        return {
+            data: built.data,
+            status: {
+                kind: 'updated',
+                at,
+                found: true,
+                shared: 'pending',
+                before: existing ? existingResponders.length : null,
+                after: built.data.responders.length,
+                removed: existingResponders.filter(name => !afterSet.has(normalizeDoctorMatchName(name))),
+                ...diagnostics
+            }
+        };
+    }
+
+    function setFormAutoImportShared(monthKeys, shared) {
+        monthKeys.forEach(monthKey => {
+            const status = syncState.formImport.byMonth[monthKey];
+            if (status && status.kind === 'updated') status.shared = shared;
+        });
+    }
+
+    // loadSharedData() の成功後に呼ぶ。options.attempt は競合で読み直した回数（1回まで）
+    async function startFormAutoImport(options = {}) {
+        if (!isSharedSyncEnabled() || !syncState.formImport.available) return;
+        const generation = syncState.formImport.generation;
+        const isCurrent = () => generation === syncState.formImport.generation;
+        const attempt = options.attempt || 0;
+        let monthKeys = [];
+        try {
+            monthKeys = getFormAutoImportMonths();
+            if (monthKeys.length === 0) return;
+            monthKeys.forEach(monthKey => {
+                const previous = syncState.formImport.byMonth[monthKey];
+                syncState.formImport.byMonth[monthKey] = { kind: 'checking', at: Date.now(), found: previous ? previous.found : undefined };
+            });
+            renderFormImportPanel();
+
+            const items = await Promise.all(monthKeys.map(monthKey =>
+                requestSharedJsonp({ action: 'formResponses', month: monthKey }, FORM_AUTO_IMPORT_TIMEOUT_MS)
+                    .then(payload => ({ monthKey, payload }))
+                    .catch(error => ({ monthKey, error }))
+            ));
+            // 待っている間に共有読込がやり直されたら、この結果は使わない
+            if (!isCurrent()) return;
+
+            // 応答がそろったら、途中で待たずに比べて取り込む（取り込む月は応答ごとに決まっていて、表示中の月には依存しない）
+            const updates = [];
+            items.forEach(item => {
+                const result = evaluateFormAutoImport(item);
+                syncState.formImport.byMonth[item.monthKey] = result.status;
+                if (result.status.kind === 'updated' || result.status.kind === 'unchanged' || Array.isArray(result.status.unusedColumns)) {
+                    syncState.formImport.diagnostics[item.monthKey] = {
+                        via: 'auto',
+                        at: result.status.at,
+                        invalidDates: result.status.invalidDates || [],
+                        unusedColumns: result.status.unusedColumns || []
+                    };
+                }
+                if (result.data) updates.push({ monthKey: item.monthKey, data: result.data });
+            });
+            if (updates.length === 0) return;
+
+            const updatedKeys = updates.map(update => update.monthKey);
+            updates.forEach(update => storeFormMonthData(update.monthKey, update.data));
+            if (syncState.unsharedLocalChanges) {
+                // 自動割り振りなど、まだ共有していない変更を、取り込みのついでに共有しない
+                saveLocalOnlyData(FORM_AUTO_IMPORT_REASON);
+                setFormAutoImportShared(updatedKeys, 'local');
+                renderDoctors();
+                renderCalendar();
+                return;
+            }
+            saveLocalData();
+            setFormAutoImportShared(updatedKeys, 'saving');
+            renderDoctors();
+            renderCalendar();
+
+            const outcome = await saveSharedData(FORM_AUTO_IMPORT_REASON, { quietConflict: true });
+            if (!isCurrent()) return;
+            if (outcome === 'saved') {
+                setFormAutoImportShared(updatedKeys, 'saved');
+            } else if (outcome === 'queued') {
+                setFormAutoImportShared(updatedKeys, 'queued');
+            } else if (outcome === 'conflict' && attempt < 1) {
+                // 他の端末が先に共有保存していた。保存せずに読み直し、もう一度だけ比べる
+                setFormAutoImportShared(updatedKeys, 'retrying');
+                renderFormImportPanel();
+                const reloaded = await loadSharedData({ silent: true, formImportAttempt: attempt + 1 });
+                if (!reloaded && isCurrent()) setFormAutoImportShared(updatedKeys, 'conflict');
+            } else if (outcome === 'conflict') {
+                setFormAutoImportShared(updatedKeys, 'conflict');
+            } else {
+                setFormAutoImportShared(updatedKeys, 'error');
+            }
+        } catch (err) {
+            console.warn('Form auto import error', err);
+            if (isCurrent()) {
+                monthKeys.forEach(monthKey => {
+                    const status = syncState.formImport.byMonth[monthKey];
+                    if (status && status.kind === 'checking') {
+                        syncState.formImport.byMonth[monthKey] = { kind: 'error', at: Date.now(), message: '自動取り込みでエラーが起きました' };
+                    }
+                });
+            }
+        } finally {
+            renderFormImportPanel();
+        }
+    }
+
+    // ===== Form Import: 結果の表示（表示中の月。フォームの文字は textContent で入れる） =====
+    function formatClockTime(ms) {
+        if (!ms) return '';
+        const date = new Date(ms);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function describeFormAutoImportStatus(status) {
+        if (!status) return '';
+        const time = formatClockTime(status.at);
+        if (status.kind === 'checking') return '自動取り込み: 確認しています…';
+        if (status.kind === 'none') return `自動取り込み: この月の回答シートは、Google側の一覧にありません（${time} 確認）`;
+        if (status.kind === 'error') return `自動取り込み: 取り込めませんでした。${status.message || ''}（${time}）`;
+        if (status.kind === 'empty') {
+            const unmatched = (status.notFound || []).length > 0 ? `名前が一致しない回答が${status.notFound.length}件あります。` : '';
+            return status.keptExisting
+                ? `自動取り込み: シートに取り込める回答がないため、取り込み済みの回答を残しました。${unmatched}（${time} 確認）`
+                : `自動取り込み: シートにまだ取り込める回答がありません。${unmatched}（${time} 確認）`;
+        }
+        if (status.kind === 'unchanged') return `自動取り込み: 変更なし（${time} 確認）`;
+        if (status.kind === 'updated') {
+            const count = status.before === null ? `${status.after}名` : `${status.before}名→${status.after}名`;
+            const sharedText = {
+                saving: '共有保存しています…',
+                saved: '共有保存しました。',
+                queued: '共有保存の順番を待っています。',
+                local: 'この端末にだけ取り込みました。ほかにまだ共有していない変更があるため、内容を確認してから「共有保存」を押してください。',
+                retrying: '他の端末の保存と重なったため、読み直しています…',
+                conflict: '他の端末の保存と重なったため、共有保存していません。「共有読込」を押してください。',
+                error: '共有保存できませんでした（この端末には取り込んであります）。'
+            }[status.shared] || '';
+            return `自動取り込み: ${time} に取り込みました（回答 ${count}）。${sharedText}`;
+        }
+        return '';
+    }
+
+    function isFormAutoImportProblem(status) {
+        if (!status) return false;
+        if (status.kind === 'error') return true;
+        return status.kind === 'updated' && ['local', 'conflict', 'error'].includes(status.shared);
+    }
+
+    function renderFormImportPanel() {
+        if (!els.formImportSummary || !els.formImportBody || !els.formImportAutoStatus) return;
+        const m = state.currentDate.getMonth() + 1;
+        const monthKey = getCurrentMonthKey();
+        const monthData = state.formResponsesByMonth && state.formResponsesByMonth[monthKey];
+        const autoStatus = syncState.formImport.byMonth[monthKey];
+        const diagnostics = syncState.formImport.diagnostics[monthKey];
+        const invalidDates = diagnostics && Array.isArray(diagnostics.invalidDates) ? diagnostics.invalidDates : [];
+        const unusedColumns = diagnostics && Array.isArray(diagnostics.unusedColumns) ? diagnostics.unusedColumns : [];
+        const notFound = monthData && Array.isArray(monthData.notFound) ? monthData.notFound : [];
+        const duplicateNames = monthData && Array.isArray(monthData.duplicateNames) ? monthData.duplicateNames : [];
+        const responders = monthData && Array.isArray(monthData.responders) ? monthData.responders : [];
+        const missing = monthData ? getFormNonResponderDoctors() : [];
+
+        const title = document.createElement('span');
+        title.className = 'form-import-title';
+        title.textContent = `${m}月のフォーム回答`;
+        const counts = document.createElement('span');
+        counts.className = 'form-import-counts';
+        counts.textContent = monthData ? `回答${responders.length}名・未回答${missing.length}名` : 'まだ取り込んでいません';
+        els.formImportSummary.replaceChildren(title, counts);
+        const removed = autoStatus && autoStatus.kind === 'updated' && Array.isArray(autoStatus.removed) ? autoStatus.removed : [];
+        if (notFound.length || invalidDates.length || unusedColumns.length || removed.length || isFormAutoImportProblem(autoStatus)) {
+            const alertBadge = document.createElement('span');
+            alertBadge.className = 'form-import-alert';
+            alertBadge.textContent = '要確認';
+            els.formImportSummary.appendChild(alertBadge);
+        }
+
+        const lines = [];
+        const addLine = (text, isAlert) => {
+            const li = document.createElement('li');
+            if (isAlert) li.className = 'is-alert';
+            li.textContent = text;
+            lines.push(li);
+        };
+        if (monthData) {
+            const importedAt = formatSyncTime(monthData.importedAt);
+            if (importedAt) addLine(`取り込み: ${importedAt}`);
+            addLine(missing.length ? `未回答（${missing.length}名）: ${missing.map(doc => doc.name).join('、')}` : '未回答: なし');
+            if (notFound.length) addLine(`名前が一致しない回答（${notFound.length}件）: ${notFound.join('、')}`, true);
+            if (duplicateNames.length) addLine(`複数回答（後の回答を採用）: ${duplicateNames.join('、')}`);
+        } else {
+            addLine('「フォーム回答取込」でファイルを選ぶか、自動取り込みで入ります。');
+        }
+        if (unusedColumns.length) {
+            addLine(`見出しが読めず取り込んでいない列: ${unusedColumns.join('、')}`, true);
+        }
+        if (invalidDates.length) {
+            addLine(`読めなかった日付（${invalidDates.length}件、反映されません）: ${invalidDates.map(formatInvalidDateItem).join('、')}`, true);
+        }
+        if (removed.length) addLine(`前回の取り込みにあって、シートにない回答: ${removed.join('、')}`, true);
+        els.formImportBody.replaceChildren(...lines);
+
+        const statusText = describeFormAutoImportStatus(autoStatus);
+        els.formImportAutoStatus.textContent = statusText;
+        els.formImportAutoStatus.classList.toggle('hidden', !statusText);
+        els.formImportAutoStatus.classList.toggle('is-alert', isFormAutoImportProblem(autoStatus));
     }
 
     // ===== Form Import: Google Form Response =====
     els.formCsvUpload.addEventListener('change', e => {
         const file = e.target.files[0]; if (!file) return;
+        const autoStatus = syncState.formImport.byMonth[getCurrentMonthKey()];
+        if (autoStatus && autoStatus.found === true) {
+            const label = `${state.currentDate.getFullYear()}年${state.currentDate.getMonth() + 1}月`;
+            const ok = confirm(
+                `${label}は、フォーム回答の自動取り込みの対象です（Google側の一覧に登録されています）。\n` +
+                'ファイルの内容で置き換えても、次に共有読込したとき、シートの内容と違えばシートの内容に戻ります。\n\n' +
+                '続けますか？'
+            );
+            if (!ok) {
+                els.formCsvUpload.value = '';
+                return;
+            }
+        }
         const reader = new FileReader();
         reader.onload = evt => {
             try {
                 const rows = file.name.toLowerCase().endsWith('.xlsx')
                     ? readWorkbookRows(evt.target.result)
                     : readCsvRows(evt.target.result);
-                const formRows = buildFormRowsFromAoA(rows);
-                const result = applyFormResponseRows(formRows);
+                const sheet = readFormSheet(rows);
+                const result = applyFormResponseRows(sheet.rows);
+                result.unusedColumns = sheet.unusedColumns || [];
+                syncState.formImport.diagnostics[result.monthKey].unusedColumns = result.unusedColumns;
                 saveData('フォーム回答取込'); renderDoctors(); renderCalendar();
                 showFormImportResult(result);
             } catch (err) {
@@ -2525,6 +2996,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (els.mobileTargetMonth) {
                 els.mobileTargetMonth.textContent = `操作対象: ${y}年${m + 1}月`;
             }
+            renderFormImportPanel();
     }
 
     function makeDateInteractive(element, dObj, dStr, onOpen) {
@@ -3270,11 +3742,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const ackNote = needsAck ? '（下のチェックを付けると保存できます）' : '';
         if (issues.blockingErrors.length || ackItems.length || issues.warns.length) {
+            // 注意にはフォームの備考（回答者が書いた文字）が入るので、HTMLとして解釈させない（2026-11-14）
+            const joinEscaped = items => items.map(escapeHtml).join('<br>');
             els.modalWarnings.innerHTML =
-                (issues.blockingErrors.length ? `<div class="modal-error">❌ 保存不可<br>${issues.blockingErrors.join('<br>')}</div>` : '') +
-                (issues.strongOverrideErrors.length ? `<div class="modal-error">❗ 規則に当たります${ackNote}<br>${issues.strongOverrideErrors.join('<br>')}</div>` : '') +
-                (issues.overrideErrors.length ? `<div class="modal-warnings">⚠️ 一時許可できます${ackNote}<br>${issues.overrideErrors.join('<br>')}</div>` : '') +
-                (issues.warns.length ? `<div class="modal-warnings">⚠️ ${issues.warns.join('<br>')}</div>` : '');
+                (issues.blockingErrors.length ? `<div class="modal-error">❌ 保存不可<br>${joinEscaped(issues.blockingErrors)}</div>` : '') +
+                (issues.strongOverrideErrors.length ? `<div class="modal-error">❗ 規則に当たります${ackNote}<br>${joinEscaped(issues.strongOverrideErrors)}</div>` : '') +
+                (issues.overrideErrors.length ? `<div class="modal-warnings">⚠️ 一時許可できます${ackNote}<br>${joinEscaped(issues.overrideErrors)}</div>` : '') +
+                (issues.warns.length ? `<div class="modal-warnings">⚠️ ${joinEscaped(issues.warns)}</div>` : '');
             els.modalWarnings.classList.remove('hidden');
         } else {
             els.modalWarnings.classList.add('hidden');

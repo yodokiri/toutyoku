@@ -68,6 +68,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, .csv-label:focu
 .csv-label { display: block; cursor: pointer; }
 .help-text { font-size: 0.65rem; color: var(--text-muted); margin-top: 4px; line-height: 1.3; }
 
+/* フォーム回答の取り込み結果（2026-11-14） */
+.form-import-panel { margin: 4px 0 6px; text-align: left; font-size: 0.72rem; color: var(--text-main); }
+.form-import-details { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.form-import-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 6px 10px; cursor: pointer; list-style: none; line-height: 1.4; }
+.form-import-summary::-webkit-details-marker { display: none; }
+.form-import-summary::before { content: '▸'; color: var(--text-muted); }
+.form-import-details[open] > .form-import-summary::before { content: '▾'; }
+.form-import-summary:focus-visible { outline: 3px solid var(--border-focus); outline-offset: 2px; }
+.form-import-title { font-weight: 700; }
+.form-import-counts { color: var(--text-muted); }
+.form-import-alert { padding: 1px 6px; border-radius: var(--radius-full); background: var(--warning-light); color: #92400e; font-weight: 700; }
+.form-import-body { margin: 0; padding: 0 10px 8px 26px; list-style: disc; line-height: 1.5; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
+.form-import-body li + li { margin-top: 2px; }
+.form-import-body li.is-alert { color: #92400e; }
+.form-import-auto { margin: 4px 2px 0; color: var(--text-muted); line-height: 1.4; overflow-wrap: anywhere; }
+.form-import-auto.is-alert { color: #b45309; font-weight: 600; }
+
 .sidebar-scrollable { flex: 1; min-height: 0; overflow-y: auto; }
 .section-header { padding: 16px 24px 8px; font-weight: 600; }
 .add-doctor-form { padding: 0 24px 16px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--border); }
