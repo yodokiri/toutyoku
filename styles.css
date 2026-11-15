@@ -98,17 +98,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, .csv-label:focu
 .ng-input-group select { padding: 6px; font-size: 0.8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .pending-ng-list { list-style: none; padding-top: 8px; display: flex; flex-direction: column; gap: 4px;}
 .pending-ng-item { font-size: 0.75rem; display: flex; justify-content: space-between; background: white; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border); }
-.pending-ng-item.hard { border-left: 3px solid var(--danger); }
-.pending-ng-item.soft { border-left: 3px solid var(--warning); }
 .remove-ng { color: var(--danger); cursor: pointer; font-weight: bold; }
 
 /* Doctor List */
 .doctor-list-container { padding: 12px 16px; }
 .doctor-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.doctor-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background-color: var(--bg-main); border-radius: var(--radius-md); border: 1px solid transparent; border-left: 4px solid transparent; }
-.doctor-item.doctor-missing-response { border-left-color: #ef4444; background: #fff7f7; }
-.doctor-item.doctor-zero-count { border-left-color: #f59e0b; }
-.doctor-item.doctor-missing-response.doctor-zero-count { border-left-color: #dc2626; }
+.doctor-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background-color: var(--bg-main); border-radius: var(--radius-md); border: 1px solid transparent; }
+.doctor-item.doctor-missing-response { background: #fff7f7; }
+.doctor-item.doctor-zero-count .doctor-count { display: inline-block; padding: 0 6px; border-radius: var(--radius-full); background: #fef3c7; color: #92400e; }
 .doctor-item.doctor-max-count { opacity: 0.88; }
 .doctor-name { font-weight: 600; font-size: 0.95rem; }
 .doctor-meta { font-size: 0.75rem; color: var(--text-muted); line-height: 1.45; }
@@ -119,7 +116,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .csv-label:focu
 .doctor-settings-btn { border: 1px solid var(--border); background: var(--bg-card); color: var(--text-main); font-size: 0.75rem; font-weight: 600; padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
 .doctor-settings-btn:hover { border-color: var(--primary); color: var(--primary); }
 .doctor-settings-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
-.doctor-item.doctor-paused { border-left-color: #9ca3af; background: #f9fafb; }
+.doctor-item.doctor-paused { background: #f9fafb; }
 .doctor-item.doctor-paused .doctor-info { opacity: 0.72; }
 .doctor-settings-content { max-width: 520px; }
 .setting-toggle { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; }
@@ -174,22 +171,22 @@ button:focus-visible, input:focus-visible, select:focus-visible, .csv-label:focu
 .shift-slots { min-width: 0; display: flex; flex-direction: column; gap: 4px; flex: 1; margin-top: auto; }
 .shift-badge { min-width: 0; min-height: 28px; padding: 4px 7px; border-radius: 5px; font-size: 0.72rem; font-weight: 650; display: flex; align-items: center; gap: 4px; border: 1px solid transparent; white-space: nowrap; overflow: hidden; }
 .shift-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.warning-label { flex: 0 0 auto; font-size: 0.58rem; line-height: 1; padding: 3px 5px; border-radius: var(--radius-full); color: white; background: var(--warning); font-weight: 800; }
-.warning-label-note { background: #ea580c; }
-.warning-label-strong { background: var(--danger); }
-.shift-badge.ward, .shift-badge.wardDay, .shift-badge.wardNight { background-color: #fbfffe; color: #0f766e; border-color: #d8f8f0; }
-.shift-badge.er, .shift-badge.erDay, .shift-badge.erNight { background-color: #f8fbff; color: #1d4ed8; border-color: #dbeafe; }
-.shift-badge.wardDay, .shift-badge.erDay { border-left: 4px solid #fde047; }
-.shift-badge.wardNight, .shift-badge.erNight { border-left: 4px solid #1e3a8a; }
+.warning-label { flex: 0 0 auto; font-size: 0.58rem; line-height: 1; padding: 3px 5px; border-radius: var(--radius-full); color: white; background: #9a3412; font-weight: 800; }
+.warning-label-note { background: #9a3412; }
+.warning-label-strong { background: #b91c1c; }
+.shift-badge.ward, .shift-badge.wardDay, .shift-badge.wardNight { background-color: #ffffff; color: #0f766e; border-color: #d1d5db; }
+.shift-badge.er, .shift-badge.erDay, .shift-badge.erNight { background-color: #ffffff; color: #1d4ed8; border-color: #d1d5db; }
 
-.shift-badge.warning { border-color: #ef4444; background-color: #fef2f2; color: #991b1b; box-shadow: inset 4px 0 0 #ef4444; }
-.shift-badge.soft-warning { border-color: #f59e0b; background-color: #fffbeb; color: #92400e; box-shadow: inset 4px 0 0 #f59e0b; }
-.shift-badge.note-warning { border-color: #fb923c; background-color: #fed7aa; color: #7c2d12; box-shadow: inset 4px 0 0 #f97316; }
-.shift-badge.empty { background-color: #ffedd5; border: 2px dashed #ea580c; color: #7c2d12; border-left: 5px solid #ea580c; font-weight: 800; }
-.shift-badge.fixed-duty { background-color: #f5f3ff; color: #5b21b6; border-color: #ddd6fe; box-shadow: inset 4px 0 0 #7c3aed; white-space: normal; line-height: 1.25; }
+.shift-badge.warning { border: 2px solid #b91c1c; background-color: #fee2e2; color: #7f1d1d; }
+.shift-badge.warning::before { content: '!'; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #b91c1c; color: #ffffff; font-size: 0.62rem; font-weight: 800; line-height: 1; }
+.shift-badge.soft-warning { border-color: #b45309; background-color: #fef3c7; color: #78350f; }
+.shift-badge.note-warning { border-color: #b45309; background-color: #fef3c7; color: #78350f; }
+.shift-badge.empty { background-color: #ffffff; border: 2px dashed #c2410c; color: #9a3412; font-weight: 800; }
+.calendar-grid.is-month-unassigned .shift-badge.empty { border: 1px dashed #cbd5e1; color: #64748b; font-weight: 600; }
+.shift-badge.fixed-duty { background-color: #f1f5f9; color: #334155; border-color: #cbd5e1; white-space: normal; line-height: 1.25; }
 .calendar-day.has-exception { box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.55); }
 .exception-label { font-size: 0.6rem; color: #b91c1c; background: #fee2e2; border: 1px solid #fecaca; border-radius: 4px; padding: 1px 4px; font-weight: 700; margin-left: 4px; white-space: nowrap; }
-.fixed-duty-label { font-size: 0.6rem; color: #5b21b6; background: #ede9fe; border: 1px solid #ddd6fe; border-radius: 4px; padding: 1px 4px; font-weight: 700; margin-left: 4px; white-space: nowrap; }
+.fixed-duty-label { font-size: 0.6rem; color: #334155; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 4px; padding: 1px 4px; font-weight: 700; margin-left: 4px; white-space: nowrap; }
 
 /* Modal */
 .modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; }
@@ -665,6 +662,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
     min-height: 50px;
     padding: 3px;
     border-top: 0;
+    border-left: 0;
     border-right: 1px solid #dbe1e8;
     border-bottom: 1px solid #dbe1e8;
     border-radius: 0;
@@ -675,8 +673,9 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
     align-items: center;
   }
   .shift-badge:last-child { border-right: 0; }
-  .shift-badge.wardDay, .shift-badge.erDay,
-  .shift-badge.wardNight, .shift-badge.erNight { border-left-width: 2px; }
+  .mobile-role-cell.note-warning::before { content: '※'; margin-right: 1px; }
+  .mobile-role-cell.fixed-duty { flex-direction: column; gap: 1px; }
+  .mobile-role-cell.fixed-duty::before { content: '固定'; font-size: 0.5rem; font-weight: 700; color: #64748b; }
   .shift-main {
     min-width: 0;
     overflow: hidden;

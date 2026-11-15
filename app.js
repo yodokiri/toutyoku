@@ -3924,7 +3924,15 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDoctors();
     }
 
+    // その月にまだ1枠も割り当てていない（固定表を除く）ときは、未割当の枠を目立たせない（2026-11-15 利用者）
+    function hasMonthAssignments(monthKey) {
+        return Object.entries(state.shifts || {}).some(([dateStr, dayShifts]) =>
+            dateStr.startsWith(`${monthKey}-`) &&
+            Object.entries(dayShifts || {}).some(([role, id]) => id && !isFixedSpecialDutyRole(dateStr, role)));
+    }
+
     function renderCalendar() {
+        els.calendarGrid.classList.toggle('is-month-unassigned', !hasMonthAssignments(getCurrentMonthKey()));
         if (viewState.mobileMedia.matches) renderMobileWeek();
         else renderDesktopMonth();
     }
