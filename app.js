@@ -1035,7 +1035,9 @@ document.addEventListener('DOMContentLoaded', () => {
         formResponsesByMonth: 'formResponsesByMonth',
         syncConfig: 'sharedSaveConfig',
         syncClientId: 'sharedSaveClientId',
-        syncRemoteMeta: 'sharedSaveRemoteMeta'
+        syncRemoteMeta: 'sharedSaveRemoteMeta',
+        // 共有保存の保存先を自動で替えたか（替えた・手で戻した）の記録。1台につき1回だけ替えるため（2026-11-15）
+        syncMove: 'sharedSaveMove'
     };
 
     function readStoredJson(key, fallback) {
@@ -1267,6 +1269,98 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveRemoteMeta() {
         writeStoredJson(STORAGE_KEYS.syncRemoteMeta, syncState.remoteMeta || {});
+    }
+
+    // ===== 共有保存の保存先の引っ越し（2026-11-15） =====
+    // 古い公開（2つ）のURLが入っている端末を、次に開いたときに、新しい公開のURLへ替える。合言葉と名前はそのまま使う。
+    // このコードは公開リポジトリで誰でも読めるので、URLはそのまま書かない。新しいURLを、古い公開のデプロイIDを鍵にして
+    // 暗号化して載せる（AES-GCM。鍵は SHA-256(keyPrefix + s + ':' + デプロイID)）。古いURLを持つ端末だけが開ける
+    const SHARED_ENDPOINT_MOVE = {
+        id: 'ych-2026-11',
+        keyPrefix: 'toutyoku-shared-move:v1:',
+        entries: [
+            // 古い公開1
+            { s: 'Hp+VPdcf4qX9zMi8rchScA==', i: 'CU8o7FEbkqXBGBed', d: 'wmUXXva91/XYtIPisQPkwxA1hyROKudmhDV8Xl1E3ffHJg34naXBAq2G4c6SJazxOSkC9LuH9QFRLKrdybdaIEAsQzIols9Wc+Vr0pJhsprmcIE5g4ugokdC4mj046lprPb0yAYtz4BnCUhs7R3sR/0pLOwIFoJhYG8o6DwB1Aw=' },
+            // 古い公開2
+            { s: 'E8GZSf2UnFTqX/cEhlJGkw==', i: '1YVNSXOVq/+CLUf2', d: 'LsLMNbgJJXl/zclCUGKfgIgWD/1COVhs6QfcO51GWVoLSj6+vx+9Z4aVHcx3sYqWzR5E5fa4/+OwX8yLDnMsE/89k7vfGS1gesTkAyjU7GG+w0tAFH1VRa/hpRkZT/WBXM/ZFcqf0RP7/21kPFgHwoDglQpu5qjgAG0fT21lJLo=' }
+        ]
+    };
+    const SHARED_ENDPOINT_MOVE_TIMEOUT_MS = 10000;
+
+    function getAppsScriptDeploymentId(endpoint) {
+        const match = String(endpoint || '').match(/\/s\/([A-Za-z0-9_-]{20,})(?=[/?#]|$)/);
+        return match ? match[1] : '';
+    }
+
+    function decodeBase64Bytes(text) {
+        return Uint8Array.from(atob(text), ch => ch.charCodeAt(0));
+    }
+
+    // 古い公開のURLなら、引っ越し先（新しい公開）のURLを返す。ほかのURLでは暗号が開かないので '' を返す
+    async function findMovedSharedEndpoint(endpoint) {
+        const deploymentId = getAppsScriptDeploymentId(endpoint);
+        if (!deploymentId || !window.crypto || !window.crypto.subtle) return '';
+        const encoder = new TextEncoder();
+        for (const entry of SHARED_ENDPOINT_MOVE.entries) {
+            try {
+                const raw = await window.crypto.subtle.digest('SHA-256', encoder.encode(`${SHARED_ENDPOINT_MOVE.keyPrefix}${entry.s}:${deploymentId}`));
+                const key = await window.crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+                const plain = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: decodeBase64Bytes(entry.i) }, key, decodeBase64Bytes(entry.d));
+                const next = new TextDecoder().decode(plain).trim();
+                if (/^https?:\/\/\S+$/.test(next)) return next;
+            } catch (err) {
+                // この古い公開のURLではない
+            }
+        }
+        return '';
+    }
+
+    function readSharedEndpointMoveRecord() {
+        const record = readStoredJson(STORAGE_KEYS.syncMove, null);
+        return record && record.id === SHARED_ENDPOINT_MOVE.id ? record : null;
+    }
+
+    // 起動時に、共有保存を読む前に呼ぶ。替えるのは1台につき1回だけで、手で古いURLに戻した端末は替えない。
+    // 新しい保存先から読めて、そこにデータが入っているときだけ替える。読めなければ何も変えず、今までどおり古い保存先を使う
+    async function moveSharedEndpointIfNeeded() {
+        if (!isSharedSyncEnabled() || readSharedEndpointMoveRecord()) return false;
+        const previousConfig = syncState.config;
+        const previousMeta = syncState.remoteMeta;
+        try {
+            const next = await findMovedSharedEndpoint(previousConfig.endpoint);
+            if (!next || next === previousConfig.endpoint) return false;
+            syncState.config = normalizeSyncConfig({ ...previousConfig, endpoint: next });
+            const meta = await requestSharedJsonp({ action: 'meta' }, SHARED_ENDPOINT_MOVE_TIMEOUT_MS);
+            // 空の保存先に替えると、この端末の内容が自動で保存されて上書きのもとになるので替えない
+            if (!meta || meta.empty || !meta.revision) throw new Error('新しい共有保存にデータがありません。');
+            writeStoredJson(STORAGE_KEYS.syncConfig, syncState.config);
+            syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
+            saveRemoteMeta();
+            writeStoredJson(STORAGE_KEYS.syncMove, { id: SHARED_ENDPOINT_MOVE.id, result: 'moved', at: new Date().toISOString() });
+            console.info('Shared endpoint moved to the new deployment');
+            return true;
+        } catch (err) {
+            // どこで失敗しても、元の保存先のまま起動を続ける（途中まで書いた分も元に戻す）
+            syncState.config = previousConfig;
+            syncState.remoteMeta = previousMeta;
+            try {
+                writeStoredJson(STORAGE_KEYS.syncConfig, previousConfig);
+                saveRemoteMeta();
+            } catch (restoreErr) {
+                console.warn('Shared endpoint move restore error', restoreErr);
+            }
+            console.warn('Shared endpoint move skipped', err);
+            return false;
+        }
+    }
+
+    // 「共有設定」で、新しい保存先から古い保存先へ手で戻したときは、この端末ではもう自動で替えない（手順書の「戻し方」）
+    async function rememberSharedEndpointRollback(previousEndpoint, nextEndpoint) {
+        if (!previousEndpoint || !nextEndpoint || previousEndpoint === nextEndpoint) return;
+        const movedTo = await findMovedSharedEndpoint(nextEndpoint);
+        if (movedTo && movedTo === previousEndpoint) {
+            writeStoredJson(STORAGE_KEYS.syncMove, { id: SHARED_ENDPOINT_MOVE.id, result: 'rolled-back', at: new Date().toISOString() });
+        }
     }
 
     function isSharedSyncEnabled() {
@@ -1599,6 +1693,8 @@ document.addEventListener('DOMContentLoaded', () => {
             saveRemoteMeta();
         }
         writeStoredJson(STORAGE_KEYS.syncConfig, syncState.config);
+        rememberSharedEndpointRollback(previousConfig.endpoint, nextConfig.endpoint)
+            .catch(err => console.warn('Shared endpoint rollback check error', err));
         closeSyncSettings();
         renderSyncStatusFromMeta();
         if (isSharedSyncEnabled()) loadSharedData({ silent: false });
@@ -4543,6 +4639,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Init =====
     async function init() {
         await fetchHolidays();
+        // 古い公開のURLのままの端末は、ここで新しい公開へ替える（読めなければ替えない。2026-11-15）
+        try {
+            await moveSharedEndpointIfNeeded();
+        } catch (err) {
+            console.warn('Shared endpoint move error', err);
+        }
         renderSyncStatusFromMeta();
         const loadedShared = await loadSharedData({ silent: true });
         if (state.doctors.length === 0) {
