@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=20261114-formauto1">
+    <link rel="stylesheet" href="./styles.css?v=20261115-formcreate1">
     <!-- SheetJS-compatible library with style support for Excel export -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -56,6 +56,7 @@
                     <div class="import-buttons">
                         <label for="form-csv-upload" class="btn-outline-small csv-label">📝 フォーム回答取込</label>
                         <input type="file" id="form-csv-upload" accept=".csv,.xlsx" class="hidden">
+                        <button id="form-create-btn" class="btn-outline-small form-create-btn hidden" type="button">📨 次の月のフォームを作る</button>
                     </div>
                     <div id="form-import-panel" class="form-import-panel">
                         <details id="form-import-details" class="form-import-details">
@@ -153,6 +154,42 @@
                 <button id="disable-sync-settings" class="btn-danger-text">共有保存を無効化</button>
                 <button id="cancel-sync-settings" class="btn-secondary">キャンセル</button>
                 <button id="save-sync-settings" class="btn-primary">保存して接続</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Creating the Monthly Form（フォームの自動作成。2026-11-15） -->
+    <div id="form-create-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="form-create-title" aria-hidden="true">
+        <div class="modal-overlay" id="form-create-overlay"></div>
+        <div class="modal-content form-create-content">
+            <div class="modal-header">
+                <h3 id="form-create-title">次の月のフォームを作る</h3>
+                <button class="close-btn" id="close-form-create" aria-label="閉じる">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="form-create-input" class="form-create-input">
+                    <div class="form-group">
+                        <label for="form-create-month">何月用のフォームか</label>
+                        <select id="form-create-month"></select>
+                    </div>
+                    <div class="form-group" id="form-create-deadline-group">
+                        <label for="form-create-deadline">締め切り（フォームの説明に書く日）</label>
+                        <input type="date" id="form-create-deadline">
+                    </div>
+                    <details class="form-create-doctors">
+                        <summary id="form-create-doctor-summary">医師名の選択肢</summary>
+                        <p id="form-create-doctor-list" class="form-create-doctor-list"></p>
+                    </details>
+                    <p id="form-create-note" class="sync-help-text">院内アカウントのGoogleドライブに、フォームと回答のスプレッドシートを作ります。質問は2027年1月用と同じです（医師名・当直希望日①〜③・当直不可日①〜③・備考）。回答は、アプリを開いたときに自動で取り込みます。締め切りの日になっても受付は止まりません。</p>
+                </div>
+                <p id="form-create-progress" class="form-create-progress hidden" role="status" aria-live="polite"></p>
+                <div id="form-create-result" class="form-create-result hidden" aria-live="polite"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-form-create" class="btn-secondary">閉じる</button>
+                <button id="submit-form-create" class="btn-primary">作る</button>
             </div>
         </div>
     </div>
@@ -256,6 +293,6 @@
         </div>
     </div>
 
-    <script src="./app.js?v=20261115-move1"></script>
+    <script src="./app.js?v=20261115-formcreate1"></script>
 </body>
 </html>

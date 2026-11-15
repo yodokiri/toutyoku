@@ -20,8 +20,14 @@ document.addEventListener('DOMContentLoaded', () => {
         '山口星一郎': '山口',
         '小澤牧人': '小澤',
         '福嶌愛': '福嶌',
-        '蘆田建毅': '蘆田'
+        '蘆田健毅': '蘆田'
     });
+    // 名前の字を直した医師（古い字 → 正しい字。どちらも空白を除いた形）。保存済みのデータは読み込むときに正しい字へ直し、
+    // 古い字の名前（古い版の画面が足した医師、フォームの回答）も同じ医師として扱う（2026-11-15 利用者: 正式は「蘆田 健毅」）
+    const DOCTOR_NAME_CORRECTIONS = Object.freeze({
+        '蘆田建毅': '蘆田健毅'
+    });
+    const CORRECTED_DOCTOR_NAMES = new Set(Object.values(DOCTOR_NAME_CORRECTIONS));
     const DEPARTMENT_BY_NAME = {
         '久保山知彦': 'ﾘｳﾏﾁ膠原病内科',
         '焦 圭裕': 'ﾘｳﾏﾁ膠原病内科',
@@ -50,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '岩根 成豪': '循環器内科',
         '岩田 幸代': '循環器内科',
         '松本 大典': '循環器内科',
-        '蘆田建毅': '循環器内科',
+        '蘆田健毅': '循環器内科',
         '竹重 遼': '循環器内科',
         '三木 秀晃': '消化器内科',
         '北村 泰明': '消化器内科',
@@ -121,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '前田晃宏'
     ]);
     const THURSDAY_WARD_NIGHT_ONLY_DOCTOR_NAMES = new Set([
-        '蘆田建毅'
+        '蘆田健毅'
     ]);
     const SATURDAY_ER_DAY_EXTRA_DOCTOR_NAMES = new Set([
         '久保山知彦'
@@ -155,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '松岡 里紗',
         '福嶌愛',
         '前田晃宏',
-        '蘆田建毅'
+        '蘆田健毅'
     ]);
     const FIXED_WEEKDAY_NG_BY_NAME = {
         '黒川 晟': new Set([0, 1]), // 日・月（水曜外来は残すため火曜夜間は不可）
@@ -212,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: '岩根 成豪', group: '医長', holidayErDayPreferred: false, outpatientDays: ['水'] },
         { name: '岩田 幸代', group: '部長', holidayErDayPreferred: false, outpatientDays: ['月', '木'] },
         { name: '松本 大典', group: '部長', holidayErDayPreferred: false, outpatientDays: ['月', '火'], availableUntil: '2026-10-31' },
-        { name: '蘆田建毅', group: '部長', holidayErDayPreferred: false, outpatientDays: [], availableFrom: '2026-10-01' },
+        { name: '蘆田健毅', group: '部長', holidayErDayPreferred: false, outpatientDays: [], availableFrom: '2026-10-01' },
         { name: '竹重 遼', group: '副部長', holidayErDayPreferred: false, outpatientDays: ['火', '金'] },
         { name: '三木 秀晃', group: '6-7年目', holidayErDayPreferred: false, outpatientDays: ['月', '木'], holidayLimitRelaxed: true },
         { name: '北村 泰明', group: '部長', holidayErDayPreferred: true, outpatientDays: ['水', '金'], wardNightAllowed: true },
@@ -298,7 +304,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== Utilities =====
     function normalizeName(n) { return (n || '').trim().replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim(); }
-    function normalizeDoctorMatchName(n) { return normalizeName(n).replace(/\s+/g, ''); }
+    function normalizeDoctorMatchName(n) {
+        const compact = normalizeName(n).replace(/\s+/g, '');
+        return Object.prototype.hasOwnProperty.call(DOCTOR_NAME_CORRECTIONS, compact) ? DOCTOR_NAME_CORRECTIONS[compact] : compact;
+    }
+    // 古い字の名前を正しい字に直す（字を直した医師は空白も除く）。ほかの名前はそのまま返す
+    function correctDoctorName(n) {
+        const compact = normalizeName(n).replace(/\s+/g, '');
+        if (Object.prototype.hasOwnProperty.call(DOCTOR_NAME_CORRECTIONS, compact)) return DOCTOR_NAME_CORRECTIONS[compact];
+        if (CORRECTED_DOCTOR_NAMES.has(compact)) return compact;
+        return n;
+    }
+    // 名前の並び（回答した医師など）を正しい字に直す。直した結果で同じ医師が2回出たら、後の方を外す
+    function correctDoctorNameList(names) {
+        const seen = new Set();
+        return (Array.isArray(names) ? names : []).map(correctDoctorName).filter(name => {
+            const key = normalizeDoctorMatchName(name);
+            if (!CORRECTED_DOCTOR_NAMES.has(key)) return true;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
     // フォームの文字（備考など）をHTMLとして画面に入れるときは必ずこれを通す（2026-11-14）
     function escapeHtml(value) {
         return String(value === null || value === undefined ? '' : value)
@@ -876,6 +903,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function migrateDoctor(doc) {
+        // 名前の字を直した医師は、同じ医師（同じ id）のまま名前だけ直す（2026-11-15）
+        doc = { ...(doc || {}), name: correctDoctorName(doc && doc.name) };
         const defaultDoctor = DEFAULT_DOCTORS.find(d => normalizeName(d.name) === normalizeName(doc.name));
         let group = normalizeGroupName(doc.group) || '3-5年目';
         if (defaultDoctor && group === '副部長以上') group = defaultDoctor.group;
@@ -951,7 +980,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const preferredDates1 = Array.isArray(record && record.preferredDates1) ? record.preferredDates1 : [];
         const preferredDates2 = Array.isArray(record && record.preferredDates2) ? record.preferredDates2 : [];
         return {
-            doctorName: (record && record.doctorName) || '',
+            doctorName: correctDoctorName((record && record.doctorName) || '') || '',
             preferredDates1,
             preferredDates2,
             preferredDates: [...new Set([
@@ -970,18 +999,82 @@ document.addEventListener('DOMContentLoaded', () => {
         const out = {};
         for (const [monthKey, snapshot] of Object.entries(formResponsesByMonth || {})) {
             const responses = {};
+            // 名前の字を直した医師の回答は、正しい字の鍵へ移す。同じ月に両方あれば正しい字の方を使う（2026-11-15）
+            const corrected = [];
             Object.entries((snapshot && snapshot.responses) || {}).forEach(([nameKey, record]) => {
+                const compact = normalizeName(nameKey).replace(/\s+/g, '');
+                if (Object.prototype.hasOwnProperty.call(DOCTOR_NAME_CORRECTIONS, compact)) {
+                    corrected.push([DOCTOR_NAME_CORRECTIONS[compact], record]);
+                    return;
+                }
                 responses[nameKey] = migrateFormResponseRecord(record);
+            });
+            corrected.forEach(([nameKey, record]) => {
+                if (responses[nameKey]) return;
+                const migrated = migrateFormResponseRecord(record);
+                responses[nameKey] = { ...migrated, doctorName: migrated.doctorName || nameKey };
             });
             out[monthKey] = {
                 importedAt: (snapshot && snapshot.importedAt) || '',
-                responders: Array.isArray(snapshot && snapshot.responders) ? snapshot.responders : [],
-                duplicateNames: Array.isArray(snapshot && snapshot.duplicateNames) ? snapshot.duplicateNames : [],
+                responders: correctDoctorNameList(snapshot && snapshot.responders),
+                duplicateNames: correctDoctorNameList(snapshot && snapshot.duplicateNames),
                 notFound: Array.isArray(snapshot && snapshot.notFound) ? snapshot.notFound : [],
                 responses
             };
         }
         return out;
+    }
+
+    // 月ごとの回答の記録（古い形）も、回答した医師の名前を正しい字に直す。ほかの項目はそのまま
+    function migrateFormResponseStatus(formResponseStatus) {
+        const out = {};
+        for (const [monthKey, status] of Object.entries(formResponseStatus || {})) {
+            if (!status || typeof status !== 'object') {
+                out[monthKey] = status;
+                continue;
+            }
+            out[monthKey] = { ...status };
+            if (Array.isArray(status.responders)) out[monthKey].responders = correctDoctorNameList(status.responders);
+            if (Array.isArray(status.duplicateNames)) out[monthKey].duplicateNames = correctDoctorNameList(status.duplicateNames);
+        }
+        return out;
+    }
+
+    // 古い版の画面（名前を直す前のアプリ）が、直した名前の医師を「一覧にいない」と見て古い字の医師をもう1人足し、
+    // それが共有されたときに、1人にまとめる。割り当ての多い方を残し、もう一方の割り当ては残す方へつけ替える（2026-11-15）
+    function mergeCorrectedDoctorDuplicates(target) {
+        if (!target || !Array.isArray(target.doctors)) return 0;
+        const groups = new Map();
+        target.doctors.forEach(doc => {
+            const key = normalizeDoctorMatchName(doc && doc.name);
+            if (!doc || !doc.id || !CORRECTED_DOCTOR_NAMES.has(key)) return;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(doc);
+        });
+        const shiftMaps = [target.shifts, ...Object.values(target.savedMonths || {}).map(saved => saved && saved.shifts)]
+            .filter(shifts => shifts && typeof shifts === 'object');
+        const remap = new Map();
+        groups.forEach(docs => {
+            if (docs.length < 2) return;
+            const counts = new Map(docs.map(doc => [doc.id, 0]));
+            shiftMaps.forEach(shifts => Object.values(shifts).forEach(day => Object.values(day || {}).forEach(id => {
+                if (counts.has(id)) counts.set(id, counts.get(id) + 1);
+            })));
+            const keep = docs.reduce((best, doc) => (counts.get(doc.id) > counts.get(best.id) ? doc : best), docs[0]);
+            docs.forEach(doc => {
+                if (doc !== keep && doc.id !== keep.id) remap.set(doc.id, keep.id);
+            });
+        });
+        if (remap.size === 0) return 0;
+        target.doctors = target.doctors.filter(doc => !(doc && remap.has(doc.id)));
+        shiftMaps.forEach(shifts => Object.values(shifts).forEach(day => {
+            if (!day || typeof day !== 'object') return;
+            Object.keys(day).forEach(role => {
+                if (remap.has(day[role])) day[role] = remap.get(day[role]);
+            });
+        }));
+        console.info('Merged duplicate doctors after the name correction:', remap.size);
+        return remap.size;
     }
 
     function buildLegacyMonthlyFormResponses(doctors, formResponseStatus) {
@@ -1065,9 +1158,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadLocalSnapshot() {
         const rawDoctors = readStoredJson(STORAGE_KEYS.doctors, []);
         const doctors = (Array.isArray(rawDoctors) ? rawDoctors : []).map(migrateDoctor);
-        const formResponseStatus = readStoredJson(STORAGE_KEYS.formResponseStatus, {}) || {};
+        const formResponseStatus = migrateFormResponseStatus(readStoredJson(STORAGE_KEYS.formResponseStatus, {}) || {});
         const storedMonthlyResponses = migrateFormResponsesByMonth(readStoredJson(STORAGE_KEYS.formResponsesByMonth, {}) || {});
-        return {
+        const snapshot = {
             doctors,
             shifts: migrateShifts(readStoredJson(STORAGE_KEYS.shifts, {}) || {}),
             specialDayRules: readStoredJson(STORAGE_KEYS.specialDayRules, {}) || {},
@@ -1077,6 +1170,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? storedMonthlyResponses
                 : buildLegacyMonthlyFormResponses(doctors, formResponseStatus)
         };
+        mergeCorrectedDoctorDuplicates(snapshot);
+        return snapshot;
     }
 
     const localSnapshot = loadLocalSnapshot();
@@ -1139,6 +1234,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // フォーム回答の自動取り込み（2026-11-14）。この端末の画面の間だけの状態で、保存しない
         formImport: {
             available: false,
+            // Apps Script側がフォームの自動作成に対応しているか（load の応答の formImport.create。2026-11-15）
+            create: false,
             // Apps Script側の一覧に登録されている月（load の応答の formImport.months）。無い版の Apps Script では null
             months: null,
             generation: 0,
@@ -1207,6 +1304,21 @@ document.addEventListener('DOMContentLoaded', () => {
         formImportSummary: document.getElementById('form-import-summary'),
         formImportBody: document.getElementById('form-import-body'),
         formImportAutoStatus: document.getElementById('form-import-auto-status'),
+        formCreateBtn: document.getElementById('form-create-btn'),
+        formCreateModal: document.getElementById('form-create-modal'),
+        formCreateOverlay: document.getElementById('form-create-overlay'),
+        closeFormCreateBtn: document.getElementById('close-form-create'),
+        cancelFormCreateBtn: document.getElementById('cancel-form-create'),
+        submitFormCreateBtn: document.getElementById('submit-form-create'),
+        formCreateInput: document.getElementById('form-create-input'),
+        formCreateMonth: document.getElementById('form-create-month'),
+        formCreateDeadlineGroup: document.getElementById('form-create-deadline-group'),
+        formCreateDeadline: document.getElementById('form-create-deadline'),
+        formCreateDoctorSummary: document.getElementById('form-create-doctor-summary'),
+        formCreateDoctorList: document.getElementById('form-create-doctor-list'),
+        formCreateNote: document.getElementById('form-create-note'),
+        formCreateProgress: document.getElementById('form-create-progress'),
+        formCreateResult: document.getElementById('form-create-result'),
         clearCurrentMonthBtn: document.getElementById('clear-current-month-btn'),
 	        clearAllBtn: document.getElementById('clear-all-data-btn'),
 	        modal: document.getElementById('assignment-modal'),
@@ -1253,8 +1365,9 @@ document.addEventListener('DOMContentLoaded', () => {
         state.shifts = migrateShifts(snapshot.shifts || {});
         state.specialDayRules = snapshot.specialDayRules || {};
         state.savedMonths = migrateSavedMonths(snapshot.savedMonths || {});
-        state.formResponseStatus = snapshot.formResponseStatus || {};
+        state.formResponseStatus = migrateFormResponseStatus(snapshot.formResponseStatus || {});
         state.formResponsesByMonth = migrateFormResponsesByMonth(snapshot.formResponsesByMonth || {});
+        mergeCorrectedDoctorDuplicates(state);
     }
 
     function saveLocalData() {
@@ -1616,6 +1729,8 @@ document.addEventListener('DOMContentLoaded', () => {
             syncState.formImport.months = result && result.formImport && Array.isArray(result.formImport.months)
                 ? result.formImport.months.map(String)
                 : null;
+            syncState.formImport.create = syncState.formImport.available && result.formImport.create === true;
+            renderFormCreateButton();
             if (result.empty) {
                 syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
                 saveRemoteMeta();
@@ -1706,6 +1821,7 @@ document.addEventListener('DOMContentLoaded', () => {
         syncState.remoteMeta = { revision: '', updatedAt: '', updatedBy: '' };
         syncState.unsharedLocalChanges = false;
         syncState.formImport.available = false;
+        syncState.formImport.create = false;
         syncState.formImport.months = null;
         syncState.formImport.generation++;
         syncState.formImport.byMonth = {};
@@ -1714,6 +1830,7 @@ document.addEventListener('DOMContentLoaded', () => {
         closeSyncSettings();
         updateSyncStatus('local');
         renderFormImportPanel();
+        renderFormCreateButton();
     }
 
     els.syncSettingsBtn.addEventListener('click', openSyncSettings);
@@ -2695,7 +2812,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const built = buildFormMonthData(sheet.rows, y, m);
         const diagnostics = { notFound: built.notFound, invalidDates: built.invalidDates };
         if (built.data.responders.length === 0) {
-            return { status: { kind: 'empty', at, found: true, keptExisting: existingResponders.length > 0, ...diagnostics } };
+            // headerOk: 見出しは読めた（見出しだけのシートや、名前が一致しない回答だけのシート）。空のシートと見分けるため（2026-11-15）
+            return { status: { kind: 'empty', at, found: true, headerOk: true, keptExisting: existingResponders.length > 0, ...diagnostics } };
         }
         if (built.dateStats.total >= 3 && built.dateStats.inMonth * 2 < built.dateStats.total) {
             return { status: { kind: 'error', at, found: true, message: `回答の日付の多くが${m}月ではありません。Google側の一覧の月とシートを確認してください` } };
@@ -2832,7 +2950,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const unmatched = (status.notFound || []).length > 0 ? `名前が一致しない回答が${status.notFound.length}件あります。` : '';
             return status.keptExisting
                 ? `自動取り込み: シートに取り込める回答がないため、取り込み済みの回答を残しました。${unmatched}（${time} 確認）`
-                : `自動取り込み: シートにまだ取り込める回答がありません。${unmatched}（${time} 確認）`;
+                : `自動取り込み: シートにまだ取り込める回答がありません${status.headerOk ? '（見出しは読めました）' : ''}。${unmatched}（${time} 確認）`;
         }
         if (status.kind === 'unchanged') return `自動取り込み: 変更なし（${time} 確認）`;
         if (status.kind === 'updated') {
@@ -2953,6 +3071,426 @@ document.addEventListener('DOMContentLoaded', () => {
         if (file.name.toLowerCase().endsWith('.xlsx')) reader.readAsArrayBuffer(file);
         else reader.readAsText(file, 'UTF-8');
     });
+
+    // ===== フォームの自動作成（2026-11-15） =====
+    // Apps Script側が対応していれば（load の応答の formImport.create が true）、サイドバーに「次の月のフォームを作る」を出す。
+    // 月と締め切りを選ぶと、Apps Scriptが院内アカウントのドライブに、その月のフォームと回答のスプレッドシートを作り、
+    // 一覧（DutyApp_Forms）に1行書く（その月の回答は自動取り込みの対象になる）。作るのは2027年2月以降の月だけ（Code.gs の
+    // FORM_IMPORT_FROM と同じ）。医師名の選択肢は、この端末の医師一覧のうち、その月に在籍し、当直除外・当直休止でない先生。
+    // 作る依頼は POST（共有保存と同じく応答は読めない）で送り、結果は formInfo（JSONP）で読む。二重に作らないのは Apps Script 側
+    const FORM_CREATE_FROM_MONTH = '2027-02';
+    const FORM_CREATE_MONTH_CHOICES = 6;
+    const FORM_CREATE_POST_TIMEOUT_MS = 90000;
+    const FORM_CREATE_WAIT_MS = 60000;
+    const FORM_CREATE_POLL_MS = 3000;
+    const FORM_CREATE_EXPECTED_TITLES = ['医師名', '当直希望日①', '希望日②', '希望日③', '当直不可日①', '不可日②', '不可日③', '備考（任意）'];
+    let formCreateBusy = false;
+    let formCreateReturnFocus = null;
+
+    function isFormCreateAvailable() {
+        return isSharedSyncEnabled() && syncState.formImport.available && syncState.formImport.create === true;
+    }
+
+    function renderFormCreateButton() {
+        if (!els.formCreateBtn) return;
+        els.formCreateBtn.classList.toggle('hidden', !isFormCreateAvailable());
+    }
+
+    function isFormCreateOpen() {
+        return !!(els.formCreateModal && !els.formCreateModal.classList.contains('hidden'));
+    }
+
+    function formatFormMonthLabel(monthKey) {
+        const [y, m] = String(monthKey).split('-').map(Number);
+        return `${y}年${m}月`;
+    }
+
+    function formatFormDeadlineLabel(dateStr) {
+        const [, m, d] = String(dateStr).split('-').map(Number);
+        return `${m}月${d}日`;
+    }
+
+    function isFormMonthRegistered(monthKey) {
+        return Array.isArray(syncState.formImport.months) && syncState.formImport.months.includes(monthKey);
+    }
+
+    // 来月から6か月分（2027年1月以前は出さない）。一覧に登録済みの月は「作成済み」として選べる（リンクを見るだけ）
+    function getFormCreateMonthChoices() {
+        const today = new Date();
+        const nextKey = getMonthKey(new Date(today.getFullYear(), today.getMonth() + 1, 1));
+        const startKey = nextKey > FORM_CREATE_FROM_MONTH ? nextKey : FORM_CREATE_FROM_MONTH;
+        const [y, m] = startKey.split('-').map(Number);
+        return Array.from({ length: FORM_CREATE_MONTH_CHOICES }, (_, i) => {
+            const monthKey = getMonthKey(new Date(y, m - 1 + i, 1));
+            return { monthKey, registered: isFormMonthRegistered(monthKey) };
+        });
+    }
+
+    function getFormCreateMonthDate(monthKey) {
+        const [y, m] = monthKey.split('-').map(Number);
+        return new Date(y, m - 1, 1);
+    }
+
+    // 医師名の選択肢: その月に在籍し、当直除外・当直休止でない先生（手動のみの先生は入れる。2027年1月用と同じ）
+    function getFormCreateDoctorNames(monthKey) {
+        const monthDate = getFormCreateMonthDate(monthKey);
+        return state.doctors
+            .filter(doc => isDoctorActiveInMonth(doc, monthDate) && !isDutyExcludedDoctor(doc) && !isDutyPausedDoctor(doc))
+            .map(doc => normalizeName(doc.name))
+            .filter(Boolean);
+    }
+
+    function getFormCreatePausedDoctorNames(monthKey) {
+        const monthDate = getFormCreateMonthDate(monthKey);
+        return state.doctors
+            .filter(doc => isDoctorActiveInMonth(doc, monthDate) && !isDutyExcludedDoctor(doc) && isDutyPausedDoctor(doc))
+            .map(doc => normalizeName(doc.name));
+    }
+
+    // 締め切りの初期値: その月の3か月前の26日（2027年1月用は10月26日）。今日より前なら、今日から1週間後（月の前日まで）
+    function getDefaultFormDeadline(monthKey) {
+        const monthDate = getFormCreateMonthDate(monthKey);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        let deadline = new Date(monthDate.getFullYear(), monthDate.getMonth() - 3, 26);
+        if (deadline < today) {
+            deadline = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7);
+            const lastDay = new Date(monthDate.getFullYear(), monthDate.getMonth(), 0);
+            if (deadline > lastDay) deadline = lastDay;
+        }
+        return formatDateStr(deadline);
+    }
+
+    function updateFormCreateInputs(resetDeadline) {
+        const monthKey = els.formCreateMonth.value;
+        if (!monthKey) return;
+        const registered = isFormMonthRegistered(monthKey);
+        if (resetDeadline) els.formCreateDeadline.value = getDefaultFormDeadline(monthKey);
+        els.formCreateDeadlineGroup.classList.toggle('hidden', registered);
+        const names = getFormCreateDoctorNames(monthKey);
+        const paused = getFormCreatePausedDoctorNames(monthKey);
+        els.formCreateDoctorSummary.textContent = `医師名の選択肢（${names.length}名。${formatFormMonthLabel(monthKey)}に在籍し、当直除外・当直休止でない先生）`;
+        els.formCreateDoctorList.textContent = names.join('、') + (paused.length > 0 ? `\n当直休止のため入れない先生: ${paused.join('、')}` : '');
+        els.formCreateNote.textContent = registered
+            ? `${formatFormMonthLabel(monthKey)}用は、Google側の一覧に登録済みです。作り直さずに、記録してあるリンクを表示します。`
+            : '院内アカウントのGoogleドライブに、フォームと回答のスプレッドシートを作ります。質問は2027年1月用と同じです（医師名・当直希望日①〜③・当直不可日①〜③・備考）。回答は、アプリを開いたときに自動で取り込みます。締め切りの日になっても受付は止まりません。';
+        els.submitFormCreateBtn.textContent = registered ? 'リンクを見る' : '作る';
+    }
+
+    function showFormCreateInput() {
+        els.formCreateInput.classList.remove('hidden');
+        els.formCreateProgress.classList.add('hidden');
+        els.formCreateResult.classList.add('hidden');
+        els.formCreateResult.replaceChildren();
+        els.submitFormCreateBtn.classList.remove('hidden');
+        els.submitFormCreateBtn.disabled = false;
+    }
+
+    function openFormCreate() {
+        if (!els.formCreateModal) return;
+        formCreateReturnFocus = document.activeElement;
+        if (!formCreateBusy) {
+            if (!isFormCreateAvailable()) return;
+            const choices = getFormCreateMonthChoices();
+            els.formCreateMonth.replaceChildren(...choices.map(choice => {
+                const option = document.createElement('option');
+                option.value = choice.monthKey;
+                option.textContent = `${formatFormMonthLabel(choice.monthKey)}用${choice.registered ? '（作成済み）' : ''}`;
+                return option;
+            }));
+            const first = choices.find(choice => !choice.registered) || choices[0];
+            els.formCreateMonth.value = first.monthKey;
+            showFormCreateInput();
+            updateFormCreateInputs(true);
+        }
+        els.formCreateModal.classList.remove('hidden');
+        els.formCreateModal.setAttribute('aria-hidden', 'false');
+        window.requestAnimationFrame(() => els.closeFormCreateBtn.focus());
+    }
+
+    function closeFormCreate() {
+        if (!els.formCreateModal) return;
+        els.formCreateModal.classList.add('hidden');
+        els.formCreateModal.setAttribute('aria-hidden', 'true');
+        if (formCreateReturnFocus && formCreateReturnFocus.isConnected) formCreateReturnFocus.focus();
+        formCreateReturnFocus = null;
+    }
+
+    function withFormCreateTimeout(promise, ms) {
+        let timer = null;
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('フォームを作る依頼の応答がタイムアウトしました。')), ms); })
+        ]).finally(() => clearTimeout(timer));
+    }
+
+    async function postFormCreate(monthKey, deadline, doctors, requestId) {
+        const body = new URLSearchParams();
+        body.set('action', 'createForm');
+        body.set('appKey', syncState.config.appKey || '');
+        body.set('month', monthKey);
+        body.set('deadline', deadline);
+        body.set('doctors', JSON.stringify(doctors));
+        body.set('updatedBy', getSyncUserName());
+        body.set('requestId', requestId);
+        await fetch(syncState.config.endpoint, { method: 'POST', mode: 'no-cors', body });
+    }
+
+    // 作る依頼の結果を formInfo で読む。結果が記録されるまで（作っている途中なら）少し待って読み直す
+    async function waitFormCreateResult(monthKey, requestId) {
+        const started = Date.now();
+        let lastError = null;
+        let notRunningCount = 0;
+        for (;;) {
+            try {
+                const info = await requestSharedJsonp({ action: 'formInfo', month: monthKey, requestId }, 20000);
+                if (info.result) return { info };
+                lastError = null;
+                // 作っている途中の印も結果も無いのが続くときは、依頼が届かなかった
+                notRunningCount = info.running ? 0 : notRunningCount + 1;
+                if (notRunningCount >= 3) return { info, error: new Error('フォームを作る依頼が、Google側に届かなかったようです。') };
+            } catch (err) {
+                lastError = err;
+                if (/Invalid app key|APP_KEY|Unknown action|month must be/.test((err && err.message) || '')) return { error: err };
+            }
+            if (Date.now() - started > FORM_CREATE_WAIT_MS) {
+                return { error: lastError || new Error('結果を確かめられませんでした。') , timedOut: true };
+            }
+            await new Promise(resolve => setTimeout(resolve, FORM_CREATE_POLL_MS));
+        }
+    }
+
+    function isGoogleFormLink(url) {
+        return /^https:\/\/(docs\.google\.com|forms\.gle)\//.test(String(url || ''));
+    }
+
+    function appendFormCreateLink(list, url, text) {
+        if (!isGoogleFormLink(url)) return;
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = text;
+        li.appendChild(a);
+        list.appendChild(li);
+    }
+
+    function describeFormCreateChecks(checks) {
+        const lines = [];
+        const add = (text, alert) => lines.push({ text, alert: !!alert });
+        const yesNo = (value, yes, no) => (value === true ? yes : (value === false ? no : '確かめられませんでした'));
+        add(`公開: ${yesNo(checks.published, 'している', 'していない（フォームの編集画面の右上の「公開」を押してください）')}`, checks.published !== true);
+        add(`回答の受付: ${yesNo(checks.acceptingResponses, '受け付けている', '受け付けていない')}`, checks.acceptingResponses !== true);
+        add(`回答者のログイン: ${checks.requiresLogin === null || checks.requiresLogin === undefined
+            ? '設定を読めませんでした（ログアウトした状態でリンクを開き、質問が出るか確かめてください）'
+            : yesNo(checks.requiresLogin, '要る（院外の先生が回答できないことがあります）', '要らない')}`, checks.requiresLogin === true);
+        add(`回答の編集: ${yesNo(checks.allowsResponseEdits, 'できる', 'できない')}`, checks.allowsResponseEdits !== true);
+        add(`医師名の選択肢: ${checks.choiceCount}名`, !(checks.choiceCount > 0));
+        add(`日付の質問: ${checks.dateItemsIncludeYear ? '年も選ぶ形' : '年を選ばない形'}`, !checks.dateItemsIncludeYear);
+        const titles = Array.isArray(checks.itemTitles) ? checks.itemTitles : [];
+        const sameTitles = titles.length === FORM_CREATE_EXPECTED_TITLES.length && titles.every((title, i) => title === FORM_CREATE_EXPECTED_TITLES[i]);
+        add(`質問: ${sameTitles ? '8問（2027年1月用と同じ）' : titles.join('・')}`, !sameTitles);
+        const header = Array.isArray(checks.responseHeader) ? checks.responseHeader : [];
+        const headerOk = FORM_CREATE_EXPECTED_TITLES.every(title => header.includes(title));
+        add(`回答のシート: ${checks.responseSheetName || '不明'}（見出し ${header.length}列${headerOk ? '' : '。質問の見出しがそろっていません'}）`, !headerOk);
+        return lines;
+    }
+
+    // kind: 'created'（作った）| 'already'（登録済みだった）| 'error'
+    function renderFormCreateResult(monthKey, kind, entry, checks, message) {
+        const label = formatFormMonthLabel(monthKey);
+        const nodes = [];
+        const title = document.createElement('p');
+        title.className = 'form-create-result-title' + (kind === 'error' ? ' is-error' : '');
+        title.textContent = kind === 'created'
+            ? `${label}用のフォームを作りました。`
+            : (kind === 'already' ? `${label}用は、Google側の一覧に登録済みです（作り直していません）。` : `${label}用のフォームを作れませんでした。`);
+        nodes.push(title);
+        if (message) {
+            const p = document.createElement('p');
+            p.className = kind === 'error' ? 'modal-error' : 'sync-help-text';
+            p.textContent = message;
+            nodes.push(p);
+        }
+        if (entry && isGoogleFormLink(entry.formUrl)) {
+            const group = document.createElement('div');
+            group.className = 'form-group';
+            const labelEl = document.createElement('label');
+            labelEl.htmlFor = 'form-create-url';
+            labelEl.textContent = '先生方に送るリンク（回答用）';
+            const row = document.createElement('div');
+            row.className = 'form-create-link-row';
+            const input = document.createElement('input');
+            input.id = 'form-create-url';
+            input.type = 'text';
+            input.readOnly = true;
+            input.value = entry.formUrl;
+            const copy = document.createElement('button');
+            copy.type = 'button';
+            copy.className = 'btn-secondary';
+            copy.textContent = 'コピー';
+            copy.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(input.value);
+                } catch (err) {
+                    input.focus();
+                    input.select();
+                    try { document.execCommand('copy'); } catch (copyErr) { /* 選んだ状態のまま */ }
+                }
+                copy.textContent = 'コピーしました';
+                setTimeout(() => { copy.textContent = 'コピー'; }, 2000);
+            });
+            row.append(input, copy);
+            group.append(labelEl, row);
+            nodes.push(group);
+        } else if (entry && kind !== 'error') {
+            const p = document.createElement('p');
+            p.className = 'sync-help-text';
+            p.textContent = '一覧に回答用のリンクが記録されていません（手で登録した月です）。';
+            nodes.push(p);
+        }
+        if (entry) {
+            const links = document.createElement('ul');
+            links.className = 'form-create-links';
+            appendFormCreateLink(links, entry.formUrl, '回答の画面を開く');
+            appendFormCreateLink(links, entry.editUrl, 'フォームの編集画面を開く（院内アカウント）');
+            appendFormCreateLink(links, entry.sheetUrl, '回答のスプレッドシートを開く');
+            if (links.children.length > 0) nodes.push(links);
+            if (entry.deadline) {
+                const p = document.createElement('p');
+                p.className = 'sync-help-text';
+                p.textContent = `締め切り（説明に書いた日）: ${entry.deadline}${entry.createdAt ? ` ／ 作った日時: ${entry.createdAt}` : ''}`;
+                nodes.push(p);
+            }
+        }
+        if (checks) {
+            const list = document.createElement('ul');
+            list.className = 'form-create-checks';
+            describeFormCreateChecks(checks).forEach(line => {
+                const li = document.createElement('li');
+                li.textContent = line.text;
+                if (line.alert) li.classList.add('is-alert');
+                list.appendChild(li);
+            });
+            nodes.push(list);
+        }
+        if (kind !== 'error') {
+            const p = document.createElement('p');
+            p.className = 'sync-help-text';
+            p.textContent = '回答は、アプリを開いたとき（共有読込のとき）に自動で取り込みます。締め切りの日になっても受付は止まりません。止めるときは、フォームの編集画面の「回答」で受付を止めてください。';
+            nodes.push(p);
+        }
+        els.formCreateResult.replaceChildren(...nodes);
+        els.formCreateResult.classList.remove('hidden');
+        els.formCreateInput.classList.add('hidden');
+        els.formCreateProgress.classList.add('hidden');
+        els.submitFormCreateBtn.classList.add('hidden');
+    }
+
+    // 作った月・登録済みの月を、自動取り込みの対象の月に入れ、その月の回答を読む（共有読込はしない。未共有の変更を消さないため）
+    function applyFormCreateMonths(info) {
+        if (!info || !Array.isArray(info.months)) return;
+        syncState.formImport.months = info.months.map(String);
+        startFormAutoImport();
+    }
+
+    async function submitFormCreate() {
+        if (formCreateBusy || !isFormCreateAvailable()) return;
+        const monthKey = els.formCreateMonth.value;
+        if (!/^\d{4}-\d{2}$/.test(monthKey) || monthKey < FORM_CREATE_FROM_MONTH) return;
+        const label = formatFormMonthLabel(monthKey);
+        if (isFormMonthRegistered(monthKey)) {
+            formCreateBusy = true;
+            els.submitFormCreateBtn.disabled = true;
+            try {
+                const info = await requestSharedJsonp({ action: 'formInfo', month: monthKey }, 20000);
+                if (info.entry) renderFormCreateResult(monthKey, 'already', info.entry, null, '');
+                else renderFormCreateResult(monthKey, 'error', null, null, 'Google側の一覧に、この月の行が見つかりませんでした。「共有読込」を押してから、もう一度開いてください。');
+                applyFormCreateMonths(info);
+            } catch (err) {
+                renderFormCreateResult(monthKey, 'error', null, null, (err && err.message) || String(err));
+            } finally {
+                formCreateBusy = false;
+                els.submitFormCreateBtn.disabled = false;
+            }
+            return;
+        }
+        const deadline = els.formCreateDeadline.value;
+        if (!isRealDateStr(deadline)) {
+            alert('締め切りの日付を入れてください。');
+            els.formCreateDeadline.focus();
+            return;
+        }
+        if (deadline >= `${monthKey}-01`) {
+            alert(`締め切りは、${label}より前の日にしてください。`);
+            els.formCreateDeadline.focus();
+            return;
+        }
+        const doctors = getFormCreateDoctorNames(monthKey);
+        if (doctors.length === 0) {
+            alert('医師名の選択肢がありません。');
+            return;
+        }
+        const lines = [
+            `${label}用のフォームを作りますか？`,
+            '',
+            `締め切り（説明に書く日）: ${formatFormDeadlineLabel(deadline)}`,
+            `医師名の選択肢: ${doctors.length}名`,
+            '',
+            '院内アカウントのGoogleドライブに、フォームと回答のスプレッドシートを作ります。'
+        ];
+        if (deadline < formatDateStr(new Date())) lines.splice(3, 0, '※ 締め切りが今日より前の日です');
+        if (!confirm(lines.join('\n'))) return;
+
+        formCreateBusy = true;
+        els.submitFormCreateBtn.disabled = true;
+        els.formCreateInput.classList.add('hidden');
+        els.formCreateProgress.textContent = `${label}用のフォームを作っています…（1分ほどかかることがあります。この画面を閉じても、作るのは止まりません）`;
+        els.formCreateProgress.classList.remove('hidden');
+        const requestId = `fc-${generateId()}`;
+        let outcome;
+        try {
+            try {
+                await withFormCreateTimeout(postFormCreate(monthKey, deadline, doctors, requestId), FORM_CREATE_POST_TIMEOUT_MS);
+            } catch (err) {
+                // 届いていることもあるので、結果を読みにいく
+                console.warn('Form create request error', err);
+            }
+            outcome = await waitFormCreateResult(monthKey, requestId);
+        } catch (err) {
+            outcome = { error: err };
+        }
+        const info = outcome.info || null;
+        const result = info && info.result;
+        let summary;
+        if (result && result.state === 'done') {
+            const kind = result.already ? 'already' : 'created';
+            renderFormCreateResult(monthKey, kind, info.entry, result.checks || null, '');
+            applyFormCreateMonths(info);
+            summary = kind === 'created' ? `${label}用のフォームを作りました。` : `${label}用は、Google側の一覧に登録済みでした（作り直していません）。`;
+        } else {
+            let message = result && result.error
+                ? result.error
+                : ((outcome.error && outcome.error.message) || '結果を確かめられませんでした。');
+            if (outcome.timedOut) message += ' 少し待ってから「共有読込」を押し、もう一度この画面を開いて確かめてください（作れていれば「作成済み」と出ます）。';
+            renderFormCreateResult(monthKey, 'error', info && info.entry, null, message);
+            summary = `${label}用のフォームを作れませんでした。\n\n${message}`;
+        }
+        formCreateBusy = false;
+        els.submitFormCreateBtn.disabled = false;
+        // 待っている間に画面を閉じていたら、結果を知らせる
+        if (!isFormCreateOpen()) alert(`${summary}\n\n「次の月のフォームを作る」を開き、その月を選ぶと、リンクを見られます。`);
+    }
+
+    if (els.formCreateModal) {
+        els.formCreateBtn.addEventListener('click', openFormCreate);
+        els.closeFormCreateBtn.addEventListener('click', closeFormCreate);
+        els.cancelFormCreateBtn.addEventListener('click', closeFormCreate);
+        els.formCreateOverlay.addEventListener('click', closeFormCreate);
+        els.submitFormCreateBtn.addEventListener('click', submitFormCreate);
+        els.formCreateMonth.addEventListener('change', () => updateFormCreateInputs(true));
+    }
 
     // ===== Clear Data =====
     function clearCurrentMonthAssignments() {
@@ -3950,10 +4488,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const assignmentOpen = !els.modal.classList.contains('hidden');
         const syncSettingsOpen = !els.syncSettingsModal.classList.contains('hidden');
         const doctorSettingsOpen = isDoctorSettingsOpen();
+        const formCreateOpen = isFormCreateOpen();
         if (event.key === 'Escape') {
             if (assignmentOpen) closeModal();
             else if (syncSettingsOpen) closeSyncSettings();
             else if (doctorSettingsOpen) closeDoctorSettings();
+            else if (formCreateOpen) closeFormCreate();
             else {
                 const actionsWereOpen = els.mobileActionsToggle && els.mobileActionsToggle.getAttribute('aria-expanded') === 'true';
                 setMobileActionsOpen(false);
@@ -3961,11 +4501,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             return;
         }
-        if (event.key !== 'Tab' || (!assignmentOpen && !syncSettingsOpen && !doctorSettingsOpen)) return;
-        const activeModal = assignmentOpen ? els.modal : (syncSettingsOpen ? els.syncSettingsModal : els.doctorSettingsModal);
-        const focusable = Array.from(activeModal.querySelectorAll(
-            'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )).filter(element => !element.classList.contains('hidden'));
+        if (event.key !== 'Tab' || (!assignmentOpen && !syncSettingsOpen && !doctorSettingsOpen && !formCreateOpen)) return;
+        const activeModal = assignmentOpen ? els.modal
+            : (syncSettingsOpen ? els.syncSettingsModal : (doctorSettingsOpen ? els.doctorSettingsModal : els.formCreateModal));
+        const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        // フォームの自動作成の画面は、隠れた部分（入力・結果）を含むので、見えている要素だけにする。リンクと開閉の見出しも含める（2026-11-15）
+        const focusable = activeModal === els.formCreateModal
+            ? Array.from(activeModal.querySelectorAll(`${focusableSelector}, summary, a[href]`))
+                .filter(element => !element.closest('.hidden') && element.getClientRects().length > 0)
+            : Array.from(activeModal.querySelectorAll(focusableSelector)).filter(element => !element.classList.contains('hidden'));
         if (focusable.length === 0) return;
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
@@ -4340,7 +4884,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			            '・松岡 里紗先生は手動選択のみで、自動割り振りには入れません\n' +
 		            '・平日病棟に入る部長は個別指定者のみです\n' +
                     '・福嶌愛先生・前田晃宏先生は2026年10月から救急夜間のみです\n' +
-                    '・蘆田建毅先生は2026年10月から木曜日の病棟夜間のみです\n' +
+                    '・蘆田健毅先生は2026年10月から木曜日の病棟夜間のみです\n' +
                     '・西岡唯先生・藤本健太郎先生は2026年10月以降、候補外です\n' +
                     '・松本大典先生は2026年11月以降、候補外です\n' +
                     '・箱谷先生は2026年11月以降、一覧と候補から外します\n' +
