@@ -220,6 +220,13 @@
                         <span>病棟夜間の候補に表示し、手動で選べるようにします。自動割り振りには入りません。翌日が外来の夜は注意が出ます。</span>
                     </span>
                 </label>
+                <label class="setting-toggle hidden" for="doctor-setting-ward-month" id="doctor-setting-ward-month-row">
+                    <input type="checkbox" id="doctor-setting-ward-month">
+                    <span class="setting-toggle-text">
+                        <strong id="doctor-setting-ward-month-title">この月は病棟当直も可</strong>
+                        <span>救急日中可の先生を、この月だけ病棟日中・病棟夜間の候補に表示し、手動で選べるようにします。自動割り振りには入りません。ほかの月は変わりません。この月に休日救急日中を担当していると、ほかの枠には注意が出ます。</span>
+                    </span>
+                </label>
                 <label class="setting-toggle" for="doctor-setting-holiday-relaxed">
                     <input type="checkbox" id="doctor-setting-holiday-relaxed">
                     <span class="setting-toggle-text">
@@ -293,6 +300,6 @@
         </div>
     </div>
 
-    <script src="./app.js?v=20261115-nocolorband1"></script>
+    <script src="./app.js?v=20261116-wardmonth1"></script>
 </body>
 </html>

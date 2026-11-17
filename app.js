@@ -639,6 +639,29 @@ document.addEventListener('DOMContentLoaded', () => {
     function canDoWardNightByPermission(doc) {
         return hasWardNightPermission(doc) && !isErNightOnlyDoctor(doc) && !isDutyExcludedDoctor(doc);
     }
+    // 個別設定「この月は病棟当直も可」（2026-11-16）。救急日中可の医師を、設定した月だけ病棟日中・病棟夜間の候補にする。
+    // 手動で選ぶときだけ（自動割り振りは救急日中可の医師を候補から先に外す）。月は枠の日付で決める（表示中の月ではない）。
+    // その月に休日救急日中を担当していれば、他枠不可の規則はそのまま効く。wardDutyMonths は 'YYYY-MM' の配列で、空なら持たない
+    function normalizeWardDutyMonths(value) {
+        return [...new Set((Array.isArray(value) ? value : [])
+            .map(String)
+            .filter(key => /^\d{4}-(0[1-9]|1[0-2])$/.test(key)))].sort();
+    }
+    function getWardDutyMonths(doc) {
+        return Array.isArray(doc && doc.wardDutyMonths) ? doc.wardDutyMonths : [];
+    }
+    function canUseWardDutyMonthSetting(doc) {
+        return !!(doc && doc.holidayErDayPreferred) && !isErNightOnlyDoctor(doc) && !isDutyExcludedDoctor(doc);
+    }
+    function hasMonthlyWardDutyPermission(doc, dateOrMonthStr) {
+        return canUseWardDutyMonthSetting(doc) &&
+            getWardDutyMonths(doc).includes(String(dateOrMonthStr || '').slice(0, 7));
+    }
+    function canDoWardRoleByMonthPermission(doc, role, dateStr) {
+        if (!hasMonthlyWardDutyPermission(doc, dateStr)) return false;
+        if (role === 'wardDay') return canDoWardDayDoctor(doc);
+        return role === 'wardNight';
+    }
     function canDoErNightDoctor(doc) {
         if (isThursdayWardNightOnlyDoctor(doc)) return false;
         return !isFridayWardOnlyDoctor(doc) &&
@@ -925,6 +948,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ...preferredDates2,
             ...(doc.preferredDates || [])
         ])];
+        // 「この月は病棟当直も可」の月。設定の無い医師には項目を足さない（共有データの医師の中身を変えないため）
+        const wardDutyMonths = normalizeWardDutyMonths(doc.wardDutyMonths);
         return {
             id: doc.id, name: doc.name, group,
             department: doc.department || getDepartmentByName(doc.name),
@@ -935,6 +960,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dutyPaused: readDoctorSettingFlag(doc, defaultDoctor, 'dutyPaused'),
             wardNightAllowed: readDoctorSettingFlag(doc, defaultDoctor, 'wardNightAllowed'),
             holidayLimitRelaxed: readDoctorSettingFlag(doc, defaultDoctor, 'holidayLimitRelaxed'),
+            ...(wardDutyMonths.length > 0 ? { wardDutyMonths } : {}),
             ngDates1: doc.ngDates1 || doc.hardNgDates || [],
             ngDates2: doc.ngDates2 || doc.softNgDates || [],
             ngDates3: doc.ngDates3 || [],
@@ -1283,6 +1309,9 @@ document.addEventListener('DOMContentLoaded', () => {
             doctorSettingsName: document.getElementById('doctor-settings-name'),
             doctorSettingPaused: document.getElementById('doctor-setting-paused'),
             doctorSettingWardNight: document.getElementById('doctor-setting-ward-night'),
+            doctorSettingWardMonthRow: document.getElementById('doctor-setting-ward-month-row'),
+            doctorSettingWardMonth: document.getElementById('doctor-setting-ward-month'),
+            doctorSettingWardMonthTitle: document.getElementById('doctor-setting-ward-month-title'),
             doctorSettingHolidayRelaxed: document.getElementById('doctor-setting-holiday-relaxed'),
 	        todayBtn: document.getElementById('today-btn'),
 	        autoAssignBtn: document.getElementById('auto-assign-btn'),
@@ -2412,7 +2441,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isPriorityErNightDoctor(doctor)) errs.push('岸先生は救急夜間または病棟当直のみ担当可能です');
                 else if (!canDoWardDayDoctor(doctor)) errs.push('病棟は8年目以上のみ担当可能です');
             } else if (role === 'wardNight') {
-                if (!canDoWardNightDoctor(doctor, dateObj, dateStr) && !canDoWardNightByPermission(doctor)) {
+                if (
+                    !canDoWardNightDoctor(doctor, dateObj, dateStr) &&
+                    !canDoWardNightByPermission(doctor) &&
+                    !canDoWardRoleByMonthPermission(doctor, 'wardNight', dateStr)
+                ) {
                     errs.push(doctor.group === '部長' ? '部長はこの病棟夜間枠に割り当て不可です' : '病棟夜間は8年目以上、または不足時6-7年目のみ担当可能です');
                 }
             }
@@ -2432,8 +2465,14 @@ document.addEventListener('DOMContentLoaded', () => {
             errs.push(`土日祝は月${holidayDutyLimit}回が上限です`);
         }
 
-        // 救急日直希望○の通常医師は、救急医固定以外の休日救急日中のみ担当（「病棟夜間も可」の医師は病棟夜間も可）
-        if (doctor.holidayErDayPreferred && role !== 'erDay' && !(role === 'wardNight' && canDoWardNightByPermission(doctor))) {
+        // 救急日直希望○の通常医師は、救急医固定以外の休日救急日中のみ担当
+        // （「病棟夜間も可」の医師は病棟夜間も可。「この月は病棟当直も可」の月は病棟日中・病棟夜間も可）
+        if (
+            doctor.holidayErDayPreferred &&
+            role !== 'erDay' &&
+            !(role === 'wardNight' && canDoWardNightByPermission(doctor)) &&
+            !canDoWardRoleByMonthPermission(doctor, role, dateStr)
+        ) {
             errs.push('救急日直希望○のため、救急日中以外には割り当て不可です');
         }
 
@@ -3561,6 +3600,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isFormNonResponder(doc)) badges += '<span class="badge-form-missing">未回答</span>';
             if (isDutyPausedDoctor(doc)) badges += '<span class="badge-form-missing">休止中</span>';
             if (hasWardNightPermission(doc)) badges += '<span class="badge-erday-pref">病棟夜間可</span>';
+            if (hasMonthlyWardDutyPermission(doc, getCurrentMonthKey())) badges += `<span class="badge-erday-pref">${state.currentDate.getMonth() + 1}月 病棟可</span>`;
             if (isHolidayLimitRelaxedDoctor(doc)) badges += `<span class="badge-erday-pref">休日月${RELAXED_HOLIDAY_DUTY_MONTHLY_LIMIT}回</span>`;
             const opStr = doc.outpatientDays?.length ? doc.outpatientDays.join('・') : 'なし';
             const formData = getDoctorFormDataForMonth(doc);
@@ -3588,6 +3628,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Doctor Settings (個別設定) =====
     let doctorSettingsTargetId = null;
     let doctorSettingsReturnFocus = null;
+    // 「この月は病棟当直も可」の対象の月（開いたときに表示していた月）
+    let doctorSettingsMonthKey = '';
 
     function isDoctorSettingsOpen() {
         return !!(els.doctorSettingsModal && !els.doctorSettingsModal.classList.contains('hidden'));
@@ -3601,6 +3643,11 @@ document.addEventListener('DOMContentLoaded', () => {
         els.doctorSettingsName.textContent = `${doc.name}（${doc.group}）`;
         els.doctorSettingPaused.checked = isDutyPausedDoctor(doc);
         els.doctorSettingWardNight.checked = hasWardNightPermission(doc);
+        doctorSettingsMonthKey = getCurrentMonthKey();
+        els.doctorSettingWardMonthRow.classList.toggle('hidden', !canUseWardDutyMonthSetting(doc));
+        els.doctorSettingWardMonthTitle.textContent =
+            `${state.currentDate.getFullYear()}年${state.currentDate.getMonth() + 1}月は病棟当直も可`;
+        els.doctorSettingWardMonth.checked = getWardDutyMonths(doc).includes(doctorSettingsMonthKey);
         els.doctorSettingHolidayRelaxed.checked = isHolidayLimitRelaxedDoctor(doc);
         els.doctorSettingsModal.classList.remove('hidden');
         els.doctorSettingsModal.setAttribute('aria-hidden', 'false');
@@ -3612,6 +3659,7 @@ document.addEventListener('DOMContentLoaded', () => {
         els.doctorSettingsModal.classList.add('hidden');
         els.doctorSettingsModal.setAttribute('aria-hidden', 'true');
         doctorSettingsTargetId = null;
+        doctorSettingsMonthKey = '';
         if (doctorSettingsReturnFocus && doctorSettingsReturnFocus.isConnected) doctorSettingsReturnFocus.focus();
         doctorSettingsReturnFocus = null;
     }
@@ -3631,10 +3679,26 @@ document.addEventListener('DOMContentLoaded', () => {
             wardNightAllowed: els.doctorSettingWardNight.checked,
             holidayLimitRelaxed: els.doctorSettingHolidayRelaxed.checked
         };
-        const changed = Object.keys(next).some(key => !!doc[key] !== next[key]);
+        // 「この月は病棟当直も可」は月ごとに付け外しする（ほかの月の設定は変えない）
+        const monthKey = doctorSettingsMonthKey;
+        let nextWardDutyMonths = null;
+        if (monthKey && !els.doctorSettingWardMonthRow.classList.contains('hidden')) {
+            const months = getWardDutyMonths(doc);
+            const wanted = els.doctorSettingWardMonth.checked;
+            if (months.includes(monthKey) !== wanted) {
+                nextWardDutyMonths = normalizeWardDutyMonths(
+                    wanted ? [...months, monthKey] : months.filter(key => key !== monthKey)
+                );
+            }
+        }
+        const changed = Object.keys(next).some(key => !!doc[key] !== next[key]) || nextWardDutyMonths !== null;
         closeDoctorSettings();
         if (!changed) return;
         Object.assign(doc, next);
+        if (nextWardDutyMonths) {
+            if (nextWardDutyMonths.length > 0) doc.wardDutyMonths = nextWardDutyMonths;
+            else delete doc.wardDutyMonths;
+        }
         saveData('医師設定変更');
         renderDoctors();
         renderCalendar();
@@ -4139,6 +4203,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sel.innerHTML = '<option value="">-- 未割り当て --</option>';
             const isRoleCandidate = getModalRoleCandidateFilter(role);
             const isWardNightPermissionCandidate = d => role === 'wardNight' && canDoWardNightByPermission(d);
+            const isWardMonthPermissionCandidate = d => canDoWardRoleByMonthPermission(d, role, editingDateStr);
             const eligible = state.doctors.filter(d =>
                 isAutoAssignableDoctor(d, editingDateObj) && isRoleCandidate(d)
             );
@@ -4160,6 +4225,10 @@ document.addEventListener('DOMContentLoaded', () => {
             state.doctors
                 .filter(d => isAutoAssignableDoctor(d, editingDateObj) && isWardNightPermissionCandidate(d))
                 .forEach(doc => appendDoctorOption(sel, doc, '病棟夜間可'));
+            // 個別設定で「この月は病棟当直も可」にした医師（手動選択のみ。この日の月に設定があるときだけ）
+            state.doctors
+                .filter(d => isAutoAssignableDoctor(d, editingDateObj) && isWardMonthPermissionCandidate(d))
+                .forEach(doc => appendDoctorOption(sel, doc, `${Number(editingDateStr.slice(5, 7))}月 病棟可`));
             state.doctors
                 .filter(d => isDoctorActiveOnDate(d, editingDateObj) && isManualOnlyDoctor(d))
                 .forEach(doc => appendDoctorOption(sel, doc, '手動のみ'));
@@ -4170,7 +4239,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     isDoctorActiveOnDate(d, editingDateObj) &&
                     !isDutyExcludedDoctor(d) &&
                     !isManualOnlyDoctor(d) &&
-                    (isRoleCandidate(d) || isWardNightPermissionCandidate(d))
+                    (isRoleCandidate(d) || isWardNightPermissionCandidate(d) || isWardMonthPermissionCandidate(d))
                 )
                 .forEach(doc => appendDoctorOption(sel, doc, '休止中'));
             // 条件に合わない先生も、手動では一覧の最後から選べる（選ぶと注意が出て、チェックを付ければ保存できる。2026-11-07 利用者）
@@ -4814,6 +4883,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         for (const role of roles) {
                             if (isFixedSpecialDutyRole(dStr, role)) continue;
                             if (role === 'erDay' && isActiveFixedErDaySaturday(dObj)) continue;
+                            // 救急日中可の医師は、自動では休日救急日中だけに入れる（「病棟夜間も可」「この月は病棟当直も可」は手動のみ。2026-11-16）
+                            if (doc.holidayErDayPreferred && role !== 'erDay') continue;
                             // 「病棟夜間も可」だけで病棟夜間に入れる医師は、自動割り振りでは使わない
                             if (role === 'wardNight' && !canDoWardNightDoctor(doc, dObj, dStr)) continue;
                             const currentId = state.shifts[dStr][role];
@@ -4871,7 +4942,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	            '・「休日上限の緩和」の医師も、休日救急日中の月1回・同じ月の他枠不可は自動割り振りでは守ります\n' +
 	            '・自動割り振りはこれらの規則を守ります。手動では、規則に当たっても注意を確認してチェックを付ければ保存できます（同じ日に同じ先生は不可）\n' +
 	            '・個別設定で「当直休止」を付けた医師は、自動割り振りの対象から外します\n' +
-	            '・個別設定の「病棟夜間も可」は手動選択用です。自動割り振りでは使いません\n' +
+	            '・個別設定の「病棟夜間も可」「この月は病棟当直も可」は手動選択用です。自動割り振りでは使いません\n' +
 	            '・固定不可曜日は不可\n' +
 	            '・土曜は病棟1枠 + 救急日中/夜間の3枠です\n' +
             '・病棟夜間が不足する場合は6-7年目も補充候補にします\n' +
